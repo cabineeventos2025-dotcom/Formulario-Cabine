@@ -3,7 +3,9 @@ import { loadFinancialSummary, toggleNotaFiscal, type FinancialSummaryRow } from
 import { supabase } from '../../lib/supabase';
 import { formatBRL } from '../../utils/formatters';
 
-type NFFilter = 'all' | 'com_nf' | 'sem_nf';
+type NFFilter  = 'all' | 'com_nf' | 'sem_nf';
+type SortField = 'data_evento' | 'valor_total_contrato' | 'valor_pago' | 'valor_a_pagar' | 'protocolo';
+type SortDir   = 'asc' | 'desc';
 
 interface RecebimentoRecord {
   id: string;
@@ -23,14 +25,35 @@ interface RecebimentoRecord {
   };
 }
 
+function parseDateBR(val: string | null | undefined): Date | null {
+  if (!val) return null;
+  // ISO format YYYY-MM-DD from Supabase
+  const m = val.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return new Date(`${m[1]}-${m[2]}-${m[3]}T00:00:00`);
+  return null;
+}
+
+function formatDateBR(val: string | null | undefined): string {
+  const d = parseDateBR(val);
+  return d ? d.toLocaleDateString('pt-BR') : '—';
+}
+
 export function FinancialSummary() {
-  const [filter, setFilter] = useState<NFFilter>('all');
-  const [summary, setSummary] = useState<FinancialSummaryRow[]>([]);
+  const [nfFilter,   setNfFilter]   = useState<NFFilter>('all');
+  const [summary,    setSummary]    = useState<FinancialSummaryRow[]>([]);
   const [recebimentos, setRecebimentos] = useState<RecebimentoRecord[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [toggling, setToggling] = useState<string | null>(null);
-  const [editingNF, setEditingNF] = useState<string | null>(null);
-  const [nfForm, setNfForm] = useState({ data_emissao_nf: '', numero_nf: '' });
+  const [loading,    setLoading]    = useState(true);
+  const [toggling,   setToggling]   = useState<string | null>(null);
+  const [editingNF,  setEditingNF]  = useState<string | null>(null);
+  const [nfForm,     setNfForm]     = useState({ data_emissao_nf: '', numero_nf: '' });
+
+  // Date / period filter
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo,   setDateTo]   = useState('');
+
+  // Sort
+  const [sortField, setSortField] = useState<SortField>('data_evento');
+  const [sortDir,   setSortDir]   = useState<SortDir>('desc');
 
   useEffect(() => { load(); }, []);
 
@@ -69,14 +92,12 @@ export function FinancialSummary() {
 
   const handleToggleNF = async (rec: RecebimentoRecord) => {
     if (rec.nota_fiscal_emitida) {
-      // Desmarcar diretamente
       setToggling(rec.id);
       try {
         await toggleNotaFiscal(rec.id, false);
         await load();
       } finally { setToggling(null); }
     } else {
-      // Abrir formulário para preencher dados da NF
       setEditingNF(rec.id);
       setNfForm({ data_emissao_nf: '', numero_nf: '' });
     }
@@ -94,7 +115,77 @@ export function FinancialSummary() {
     } finally { setToggling(null); }
   };
 
-  // Compute totals
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDir('asc');
+    }
+  };
+
+  const SortIcon = ({ field }: { field: SortField }) => {
+    if (sortField !== field) return <span style={{ opacity: 0.3 }}> ⇅</span>;
+    return <span style={{ color: 'var(--color-secondary)' }}>{sortDir === 'asc' ? ' ↑' : ' ↓'}</span>;
+  };
+
+  // ── Apply filters ──
+  const filtered = recebimentos.filter(r => {
+    // NF filter
+    if (nfFilter === 'com_nf' && !r.nota_fiscal_emitida) return false;
+    if (nfFilter === 'sem_nf' && r.nota_fiscal_emitida)  return false;
+
+    // Date/period filter (by data_evento)
+    const fe = r.formularios_eventos as any;
+    const evDate = parseDateBR(fe?.data_evento);
+    if (dateFrom && evDate) {
+      const from = new Date(dateFrom + 'T00:00:00');
+      if (evDate < from) return false;
+    }
+    if (dateTo && evDate) {
+      const to = new Date(dateTo + 'T23:59:59');
+      if (evDate > to) return false;
+    }
+
+    return true;
+  });
+
+  // ── Apply sort ──
+  const sorted = [...filtered].sort((a, b) => {
+    const feA = a.formularios_eventos as any;
+    const feB = b.formularios_eventos as any;
+    let valA: any;
+    let valB: any;
+
+    switch (sortField) {
+      case 'data_evento':
+        valA = parseDateBR(feA?.data_evento)?.getTime() ?? 0;
+        valB = parseDateBR(feB?.data_evento)?.getTime() ?? 0;
+        break;
+      case 'protocolo':
+        valA = feA?.protocolo || '';
+        valB = feB?.protocolo || '';
+        break;
+      case 'valor_total_contrato':
+        valA = Number(a.valor_total_contrato || 0);
+        valB = Number(b.valor_total_contrato || 0);
+        break;
+      case 'valor_pago':
+        valA = Number(a.valor_pago || 0);
+        valB = Number(b.valor_pago || 0);
+        break;
+      case 'valor_a_pagar':
+        valA = Number(a.valor_a_pagar || 0);
+        valB = Number(b.valor_a_pagar || 0);
+        break;
+    }
+
+    if (valA < valB) return sortDir === 'asc' ? -1 : 1;
+    if (valA > valB) return sortDir === 'asc' ? 1 : -1;
+    return 0;
+  });
+
+  // ── Totals ──
   const comNF  = summary.find(s => s.nota_fiscal_emitida);
   const semNF  = summary.find(s => !s.nota_fiscal_emitida);
   const totals = {
@@ -104,17 +195,35 @@ export function FinancialSummary() {
     total_eventos:  (comNF?.total_eventos || 0) + (semNF?.total_eventos || 0),
   };
 
-  const filteredRec = recebimentos.filter(r => {
-    if (filter === 'com_nf') return r.nota_fiscal_emitida === true;
-    if (filter === 'sem_nf') return r.nota_fiscal_emitida === false;
-    return true;
-  });
-
   const filteredTotals = {
-    pago:    filteredRec.reduce((s, r) => s + Number(r.valor_pago || 0), 0),
-    falta:   filteredRec.reduce((s, r) => s + Number(r.valor_a_pagar || 0), 0),
-    total:   filteredRec.reduce((s, r) => s + Number(r.valor_total_contrato || 0), 0),
+    pago:  sorted.reduce((s, r) => s + Number(r.valor_pago || 0), 0),
+    falta: sorted.reduce((s, r) => s + Number(r.valor_a_pagar || 0), 0),
+    total: sorted.reduce((s, r) => s + Number(r.valor_total_contrato || 0), 0),
   };
+
+  const inputStyle: React.CSSProperties = {
+    padding: '6px 10px',
+    borderRadius: 8,
+    border: '1px solid var(--color-surface-border)',
+    background: 'var(--color-surface)',
+    color: 'var(--color-text)',
+    fontSize: '0.83rem',
+    height: 34,
+  };
+
+  const chipStyle = (active: boolean): React.CSSProperties => ({
+    padding: '5px 14px',
+    borderRadius: 20,
+    border: '1px solid',
+    cursor: 'pointer',
+    fontWeight: active ? 700 : 400,
+    fontSize: '0.83rem',
+    background: active ? 'var(--color-secondary)' : 'transparent',
+    borderColor: active ? 'var(--color-secondary)' : 'var(--color-surface-border)',
+    color: active ? '#000' : 'var(--color-text-secondary)',
+    transition: 'all 0.2s',
+    whiteSpace: 'nowrap' as const,
+  });
 
   if (loading) return (
     <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
@@ -130,10 +239,10 @@ export function FinancialSummary() {
       {/* Big summary cards */}
       <div className="stats-grid" style={{ marginBottom: 32 }}>
         {[
-          { label: 'Total de eventos', value: totals.total_eventos, suffix: '' },
-          { label: 'Total recebido', value: formatBRL(totals.total_pago), suffix: '' },
-          { label: 'Ainda a receber', value: formatBRL(totals.total_a_pagar), suffix: '', highlight: true },
-          { label: 'Valor total contratos', value: formatBRL(totals.total_contrato), suffix: '' },
+          { label: 'Total de eventos', value: totals.total_eventos },
+          { label: 'Total recebido',   value: formatBRL(totals.total_pago) },
+          { label: 'Ainda a receber',  value: formatBRL(totals.total_a_pagar), highlight: true },
+          { label: 'Total contratos',  value: formatBRL(totals.total_contrato) },
         ].map(c => (
           <div key={c.label} className="stat-card" style={c.highlight ? { borderColor: '#ef4444' } : {}}>
             <div className="stat-value" style={c.highlight ? { color: '#ef4444' } : {}}>{c.value}</div>
@@ -143,133 +252,170 @@ export function FinancialSummary() {
       </div>
 
       {/* NF breakdown */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 32 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 28 }}>
         {[
-          {
-            label: '✅ Com Nota Fiscal',
-            data: comNF,
-            color: '#22c55e',
-            bg: 'rgba(34,197,94,0.08)',
-            border: 'rgba(34,197,94,0.3)',
-          },
-          {
-            label: '❌ Sem Nota Fiscal',
-            data: semNF,
-            color: '#ef4444',
-            bg: 'rgba(239,68,68,0.08)',
-            border: 'rgba(239,68,68,0.3)',
-          },
+          { label: '✅ Com Nota Fiscal', data: comNF, color: '#22c55e', bg: 'rgba(34,197,94,0.08)', border: 'rgba(34,197,94,0.3)' },
+          { label: '❌ Sem Nota Fiscal', data: semNF, color: '#ef4444', bg: 'rgba(239,68,68,0.08)', border: 'rgba(239,68,68,0.3)' },
         ].map(card => (
-          <div key={card.label} style={{
-            background: card.bg,
-            border: `1px solid ${card.border}`,
-            borderRadius: 12,
-            padding: '20px 24px',
-          }}>
-            <div style={{ fontWeight: 700, color: card.color, marginBottom: 12, fontSize: '0.95rem' }}>
-              {card.label}
-            </div>
+          <div key={card.label} style={{ background: card.bg, border: `1px solid ${card.border}`, borderRadius: 12, padding: '20px 24px' }}>
+            <div style={{ fontWeight: 700, color: card.color, marginBottom: 12, fontSize: '0.95rem' }}>{card.label}</div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
               <div>
                 <div style={{ fontSize: '0.7rem', color: 'var(--color-muted)', marginBottom: 4 }}>Eventos</div>
-                <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--color-text)' }}>
-                  {card.data?.total_eventos || 0}
-                </div>
+                <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--color-text)' }}>{card.data?.total_eventos || 0}</div>
               </div>
               <div>
                 <div style={{ fontSize: '0.7rem', color: 'var(--color-muted)', marginBottom: 4 }}>Recebido</div>
-                <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#22c55e' }}>
-                  {formatBRL(card.data?.total_pago || 0)}
-                </div>
+                <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#22c55e' }}>{formatBRL(card.data?.total_pago || 0)}</div>
               </div>
               <div>
                 <div style={{ fontSize: '0.7rem', color: 'var(--color-muted)', marginBottom: 4 }}>A receber</div>
-                <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#ef4444' }}>
-                  {formatBRL(card.data?.total_a_pagar || 0)}
-                </div>
+                <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#ef4444' }}>{formatBRL(card.data?.total_a_pagar || 0)}</div>
               </div>
               <div>
                 <div style={{ fontSize: '0.7rem', color: 'var(--color-muted)', marginBottom: 4 }}>Total contratos</div>
-                <div style={{ fontSize: '1.1rem', fontWeight: 700, color: card.color }}>
-                  {formatBRL(card.data?.total_contrato || 0)}
-                </div>
+                <div style={{ fontSize: '1.1rem', fontWeight: 700, color: card.color }}>{formatBRL(card.data?.total_contrato || 0)}</div>
               </div>
             </div>
           </div>
         ))}
       </div>
 
-      {/* Filter + subtotal */}
+      {/* ── FILTERS BAR ── */}
       <div style={{
-        display: 'flex', alignItems: 'center', gap: 12,
-        flexWrap: 'wrap', marginBottom: 16,
+        background: 'var(--color-surface)',
+        border: '1px solid var(--color-surface-border)',
+        borderRadius: 12,
+        padding: '16px 20px',
+        marginBottom: 16,
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: 16,
+        alignItems: 'flex-end',
       }}>
-        <div style={{ fontWeight: 600, color: 'var(--color-text)', fontSize: '0.95rem', flex: '0 0 auto' }}>
-          Filtrar registros:
+        {/* NF filter chips */}
+        <div>
+          <div style={{ fontSize: '0.72rem', color: 'var(--color-muted)', marginBottom: 6, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+            Nota Fiscal
+          </div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {([
+              { id: 'all',    label: 'Todos' },
+              { id: 'com_nf', label: '✅ Com NF' },
+              { id: 'sem_nf', label: '❌ Sem NF' },
+            ] as { id: NFFilter; label: string }[]).map(f => (
+              <button key={f.id} onClick={() => setNfFilter(f.id)} style={chipStyle(nfFilter === f.id)}>
+                {f.label}
+              </button>
+            ))}
+          </div>
         </div>
-        {([
-          { id: 'all', label: 'Todos' },
-          { id: 'com_nf', label: '✅ Com NF' },
-          { id: 'sem_nf', label: '❌ Sem NF' },
-        ] as { id: NFFilter; label: string }[]).map(f => (
-          <button
-            key={f.id}
-            onClick={() => setFilter(f.id)}
-            style={{
-              padding: '6px 16px',
-              borderRadius: 20,
-              border: '1px solid',
-              cursor: 'pointer',
-              fontWeight: filter === f.id ? 700 : 400,
-              fontSize: '0.85rem',
-              background: filter === f.id ? 'var(--color-secondary)' : 'transparent',
-              borderColor: filter === f.id ? 'var(--color-secondary)' : 'var(--color-surface-border)',
-              color: filter === f.id ? '#000' : 'var(--color-text-secondary)',
-              transition: 'all 0.2s',
-            }}
-          >{f.label}</button>
-        ))}
 
-        {/* Subtotal for filter */}
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 24, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '0.85rem', color: 'var(--color-muted)' }}>
-            Subtotal pago: <strong style={{ color: '#22c55e' }}>{formatBRL(filteredTotals.pago)}</strong>
+        {/* Period: from */}
+        <div>
+          <div style={{ fontSize: '0.72rem', color: 'var(--color-muted)', marginBottom: 6, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+            Evento: de
+          </div>
+          <input
+            type="date"
+            style={inputStyle}
+            value={dateFrom}
+            onChange={e => setDateFrom(e.target.value)}
+          />
+        </div>
+
+        {/* Period: to */}
+        <div>
+          <div style={{ fontSize: '0.72rem', color: 'var(--color-muted)', marginBottom: 6, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+            Evento: até
+          </div>
+          <input
+            type="date"
+            style={inputStyle}
+            value={dateTo}
+            onChange={e => setDateTo(e.target.value)}
+          />
+        </div>
+
+        {/* Clear button */}
+        {(dateFrom || dateTo || nfFilter !== 'all') && (
+          <button
+            onClick={() => { setDateFrom(''); setDateTo(''); setNfFilter('all'); }}
+            style={{
+              ...chipStyle(false),
+              borderColor: 'rgba(239,68,68,0.4)',
+              color: '#ef4444',
+              alignSelf: 'flex-end',
+            }}
+          >
+            ✕ Limpar filtros
+          </button>
+        )}
+
+        {/* Subtotals */}
+        <div style={{ marginLeft: 'auto', display: 'flex', flexDirection: 'column', gap: 4, alignSelf: 'flex-end', textAlign: 'right' }}>
+          <span style={{ fontSize: '0.8rem', color: 'var(--color-muted)' }}>
+            {sorted.length} registro{sorted.length !== 1 ? 's' : ''} filtrado{sorted.length !== 1 ? 's' : ''}
           </span>
-          <span style={{ fontSize: '0.85rem', color: 'var(--color-muted)' }}>
-            A receber: <strong style={{ color: '#ef4444' }}>{formatBRL(filteredTotals.falta)}</strong>
-          </span>
-          <span style={{ fontSize: '0.85rem', color: 'var(--color-muted)' }}>
-            Total: <strong style={{ color: 'var(--color-secondary)' }}>{formatBRL(filteredTotals.total)}</strong>
-          </span>
+          <div style={{ display: 'flex', gap: 16 }}>
+            <span style={{ fontSize: '0.83rem', color: 'var(--color-muted)' }}>
+              Pago: <strong style={{ color: '#22c55e' }}>{formatBRL(filteredTotals.pago)}</strong>
+            </span>
+            <span style={{ fontSize: '0.83rem', color: 'var(--color-muted)' }}>
+              A receber: <strong style={{ color: '#ef4444' }}>{formatBRL(filteredTotals.falta)}</strong>
+            </span>
+            <span style={{ fontSize: '0.83rem', color: 'var(--color-muted)' }}>
+              Total: <strong style={{ color: 'var(--color-secondary)' }}>{formatBRL(filteredTotals.total)}</strong>
+            </span>
+          </div>
         </div>
       </div>
 
-      {/* Table */}
+      {/* ── TABLE ── */}
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
           <thead>
             <tr>
-              {['Protocolo', 'Contratante', 'Data Evento', 'Pago', 'A Receber', 'Total', 'NF Emitida', 'Nº NF'].map(h => (
-                <th key={h} style={{
-                  padding: '10px 12px', textAlign: 'left',
-                  background: 'var(--color-surface-hover)',
-                  color: 'var(--color-text-secondary)',
-                  fontWeight: 600,
-                  borderBottom: '1px solid var(--color-surface-border)',
-                  whiteSpace: 'nowrap',
-                }}>{h}</th>
+              {([
+                { label: 'Protocolo',    field: 'protocolo'            },
+                { label: 'Contratante',  field: null                   },
+                { label: 'Data Evento',  field: 'data_evento'          },
+                { label: 'Pago',         field: 'valor_pago'           },
+                { label: 'A Receber',    field: 'valor_a_pagar'        },
+                { label: 'Total',        field: 'valor_total_contrato' },
+                { label: 'NF Emitida',   field: null                   },
+                { label: 'Nº NF',        field: null                   },
+              ] as { label: string; field: SortField | null }[]).map(h => (
+                <th
+                  key={h.label}
+                  onClick={h.field ? () => handleSort(h.field!) : undefined}
+                  style={{
+                    padding: '10px 12px',
+                    textAlign: 'left',
+                    background: 'var(--color-surface-hover)',
+                    color: sortField === h.field ? 'var(--color-secondary)' : 'var(--color-text-secondary)',
+                    fontWeight: 600,
+                    borderBottom: '1px solid var(--color-surface-border)',
+                    whiteSpace: 'nowrap',
+                    cursor: h.field ? 'pointer' : 'default',
+                    userSelect: 'none',
+                    transition: 'color 0.15s',
+                  }}
+                >
+                  {h.label}{h.field && <SortIcon field={h.field} />}
+                </th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {filteredRec.length === 0 && (
+            {sorted.length === 0 && (
               <tr>
                 <td colSpan={8} style={{ padding: '32px', textAlign: 'center', color: 'var(--color-muted)' }}>
-                  Nenhum recebimento encontrado.
+                  Nenhum registro encontrado para os filtros selecionados.
                 </td>
               </tr>
             )}
-            {filteredRec.map(rec => {
+            {sorted.map(rec => {
               const fe = rec.formularios_eventos as any;
               const nome = fe?.tipo_pessoa === 'PF' ? fe?.nome_contratante : fe?.nome_fantasia;
               return (
@@ -277,6 +423,7 @@ export function FinancialSummary() {
                   <tr style={{
                     borderBottom: '1px solid var(--color-surface-border)',
                     background: editingNF === rec.id ? 'rgba(247,148,29,0.05)' : undefined,
+                    transition: 'background 0.15s',
                   }}>
                     <td style={{ padding: '10px 12px', fontFamily: 'monospace', fontSize: '0.78rem', color: 'var(--color-secondary)' }}>
                       {fe?.protocolo || '—'}
@@ -285,7 +432,7 @@ export function FinancialSummary() {
                       {nome || '—'}
                     </td>
                     <td style={{ padding: '10px 12px', color: 'var(--color-text-secondary)' }}>
-                      {fe?.data_evento ? new Date(fe.data_evento + 'T00:00:00').toLocaleDateString('pt-BR') : '—'}
+                      {formatDateBR(fe?.data_evento)}
                     </td>
                     <td style={{ padding: '10px 12px', color: '#22c55e', fontWeight: 600 }}>
                       {formatBRL(rec.valor_pago)}
@@ -333,13 +480,11 @@ export function FinancialSummary() {
                         <div style={{
                           background: 'rgba(247,148,29,0.08)',
                           border: '1px solid rgba(247,148,29,0.3)',
-                          borderRadius: 8, padding: '16px', display: 'flex',
-                          gap: 12, alignItems: 'flex-end', flexWrap: 'wrap',
+                          borderRadius: 8, padding: '16px',
+                          display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap',
                         }}>
                           <div>
-                            <div style={{ fontSize: '0.75rem', color: 'var(--color-muted)', marginBottom: 6 }}>
-                              Nº da Nota Fiscal
-                            </div>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--color-muted)', marginBottom: 6 }}>Nº da Nota Fiscal</div>
                             <input
                               type="text"
                               className="field-input"
@@ -350,9 +495,7 @@ export function FinancialSummary() {
                             />
                           </div>
                           <div>
-                            <div style={{ fontSize: '0.75rem', color: 'var(--color-muted)', marginBottom: 6 }}>
-                              Data de emissão
-                            </div>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--color-muted)', marginBottom: 6 }}>Data de emissão</div>
                             <input
                               type="date"
                               className="field-input"
@@ -361,19 +504,10 @@ export function FinancialSummary() {
                               onChange={e => setNfForm(f => ({ ...f, data_emissao_nf: e.target.value }))}
                             />
                           </div>
-                          <button
-                            className="btn btn-primary"
-                            disabled={toggling === rec.id}
-                            onClick={() => handleSaveNF(rec.id)}
-                            style={{ padding: '8px 20px' }}
-                          >
+                          <button className="btn btn-primary" disabled={toggling === rec.id} onClick={() => handleSaveNF(rec.id)} style={{ padding: '8px 20px' }}>
                             {toggling === rec.id ? 'Salvando...' : '✅ Marcar como emitida'}
                           </button>
-                          <button
-                            className="btn btn-ghost"
-                            onClick={() => setEditingNF(null)}
-                            style={{ padding: '8px 16px' }}
-                          >
+                          <button className="btn btn-ghost" onClick={() => setEditingNF(null)} style={{ padding: '8px 16px' }}>
                             Cancelar
                           </button>
                         </div>
