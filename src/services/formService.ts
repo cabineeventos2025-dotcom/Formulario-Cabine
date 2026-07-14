@@ -25,7 +25,7 @@ export async function submitForm(formData: FormData): Promise<SubmitResult> {
     complemento: formData.complemento || null,
     bairro: formData.bairro || null,
     cidade: formData.cidade || null,
-    estado: formData.estado || null,
+    estado: formData.estado || 'MG',
     telefone: formData.telefone ? onlyDigits(formData.telefone) : null,
     email: formData.email || null,
     contato_cerimonial: formData.contato_cerimonial || null,
@@ -36,7 +36,7 @@ export async function submitForm(formData: FormData): Promise<SubmitResult> {
     complemento_evento: formData.complemento_evento || null,
     bairro_evento: formData.bairro_evento || null,
     cidade_evento: formData.cidade_evento || null,
-    estado_evento: formData.estado_evento || null,
+    estado_evento: formData.estado_evento || 'MG',
     referencia_evento: formData.referencia_evento || null,
     data_evento: formData.data_evento || null,
     horario_inicio_evento: formData.horario_inicio_evento || null,
@@ -61,23 +61,45 @@ export async function submitForm(formData: FormData): Promise<SubmitResult> {
     sincronizado_planilha: false,
   };
 
+  // Attempt 1: insert and select back (works if RLS allows anon select)
   const { data, error } = await supabase
     .from('formularios_eventos')
     .insert(payload)
     .select('id, protocolo')
     .single();
 
-  if (error) {
-    if (error.code === '23505') {
-      const { data: existing } = await supabase
-        .from('formularios_eventos')
-        .select('id, protocolo')
-        .eq('submission_id', formData.submission_id)
-        .single();
-      if (existing) return { protocolo: existing.protocolo, id: existing.id };
-    }
-    throw new Error(error.message);
+  if (!error && data) {
+    return { protocolo: data.protocolo, id: data.id };
   }
 
-  return { protocolo: data.protocolo, id: data.id };
+  // Duplicate submission_id: fetch existing record
+  if (error?.code === '23505') {
+    const { data: existing, error: fetchError } = await supabase
+      .from('formularios_eventos')
+      .select('id, protocolo')
+      .eq('submission_id', formData.submission_id)
+      .maybeSingle();
+    if (!fetchError && existing) {
+      return { protocolo: existing.protocolo, id: existing.id };
+    }
+  }
+
+  // RLS may block the SELECT after insert for anon users.
+  // Try insert without select, then build a synthetic result.
+  if (error?.code === 'PGRST301' || error?.message?.includes('row-level security')) {
+    const { error: insertOnlyError } = await supabase
+      .from('formularios_eventos')
+      .insert(payload);
+
+    if (!insertOnlyError) {
+      // Return submission_id as a proxy ID — enough to navigate to success
+      return {
+        protocolo: `CSA-${new Date().getFullYear()}-PENDENTE`,
+        id: formData.submission_id,
+      };
+    }
+    throw new Error(insertOnlyError.message);
+  }
+
+  throw new Error(error?.message || 'Erro desconhecido ao salvar formulário');
 }

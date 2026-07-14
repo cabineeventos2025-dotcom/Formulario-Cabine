@@ -174,20 +174,26 @@ export function AddressFields({
         </div>
         <div className="field-wrapper">
           <label className="field-label">
-            Estado <span className="required-mark">*</span>
+            Estado
           </label>
-          <select
-            id="field-estado"
-            className={`field-input ${errors.estado ? 'error' : ''}`}
-            value={values.estado}
-            onChange={(e) => onChange('estado', e.target.value)}
+          {/* UF sempre MG — exibido como campo readonly */}
+          <div
+            style={{
+              padding: '0 14px',
+              height: 44,
+              display: 'flex',
+              alignItems: 'center',
+              background: 'var(--color-surface-hover)',
+              border: '1px solid var(--color-surface-border)',
+              borderRadius: 8,
+              color: 'var(--color-text)',
+              fontWeight: 700,
+              fontSize: '0.95rem',
+              letterSpacing: 1,
+            }}
           >
-            <option value="">UF</option>
-            {ESTADOS.map((uf) => (
-              <option key={uf} value={uf}>{uf}</option>
-            ))}
-          </select>
-          {errors.estado && <span className="field-error">{errors.estado}</span>}
+            MG
+          </div>
         </div>
       </div>
 

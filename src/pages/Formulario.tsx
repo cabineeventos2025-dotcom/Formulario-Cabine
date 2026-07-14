@@ -213,7 +213,7 @@ export function Formulario() {
       if (!formData.numero) newErrors.numero = 'Informe o número.';
       if (!formData.bairro) newErrors.bairro = 'Informe o bairro.';
       if (!formData.cidade) newErrors.cidade = 'Informe a cidade.';
-      if (!formData.estado) newErrors.estado = 'Selecione o estado.';
+      // estado sempre 'MG' — não precisa validar
     }
 
     if (currentStep === 'contatos') {
@@ -337,11 +337,13 @@ export function Formulario() {
         },
       });
     } catch (err: any) {
+      const msg = err?.message || String(err);
       addToast(
-        'Erro ao enviar. Verifique sua conexão e tente novamente.',
+        `Erro ao enviar: ${msg}`,
         'error',
-        6000
+        10000
       );
+      console.error('[handleSubmit]', err);
     } finally {
       setSubmitting(false);
     }
