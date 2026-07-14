@@ -713,18 +713,11 @@ function PackageManager() {
   const [editing, setEditing] = useState<any | null>(null);
   const [form, setForm] = useState({ nome: '', descricao: '', tamanho_foto: '', imagem_url: '', permite_pf: true, permite_pj: true, ativo: true, ordem: 1 });
   const [imgPreviewError, setImgPreviewError] = useState(false);
+  const [confirmDelPkg, setConfirmDelPkg] = useState<string | null>(null);
+  const [deletingPkg,   setDeletingPkg]   = useState(false);
 
-  // Auto-fix ImgBB page URL -> direct image URL
-  const normalizeImageUrl = (raw: string): string => {
-    // ibb.co/XXXXX -> i.ibb.co (needs page scrape, so we just warn)
-    // ibb.co/XXXXX/filename.jpg -> i.ibb.co/XXXXX/filename.jpg  
-    const match = raw.match(/^https?:\/\/(?:www\.)?ibb\.co\/([a-zA-Z0-9]+)(\/[\w.-]+)?$/);
-    if (match) {
-      // If it's a page link (no filename), we can't auto-convert — just return raw
-      return raw;
-    }
-    return raw;
-  };
+  const isIbbPageLink = (url: string) =>
+    /^https?:\/\/(www\.)?ibb\.co\/[A-Za-z0-9]+$/.test(url.trim());
 
   const handleImageUrl = (raw: string) => {
     setImgPreviewError(false);
@@ -754,6 +747,17 @@ function PackageManager() {
   const toggleAtivo = async (id: string, ativo: boolean) => {
     await supabase.from('pacotes').update({ ativo: !ativo }).eq('id', id);
     loadPackages();
+  };
+
+  const deletePkg = async (id: string) => {
+    setDeletingPkg(true);
+    try {
+      await supabase.from('pacotes').delete().eq('id', id);
+      setConfirmDelPkg(null);
+      loadPackages();
+    } finally {
+      setDeletingPkg(false);
+    }
   };
 
   return (
@@ -796,8 +800,21 @@ function PackageManager() {
                 onChange={e => handleImageUrl(e.target.value)}
                 placeholder="https://i.ibb.co/... ou outro link direto"
               />
+              {/* ImgBB page link warning */}
+              {form.imagem_url && isIbbPageLink(form.imagem_url) && (
+                <div style={{
+                  marginTop: 8, padding: '10px 14px',
+                  background: 'rgba(247,148,29,0.08)', border: '1px solid rgba(247,148,29,0.3)',
+                  borderRadius: 8, fontSize: '0.82rem', color: 'var(--color-secondary)',
+                }}>
+                  ⚠️ Este é o link da <strong>página</strong> do ImgBB, não da imagem.<br />
+                  No ImgBB, clique em <strong>"&lt;/&gt; Códigos para Incorporar"</strong> e no campo
+                  <strong> "Imagem completa &gt; HTML"</strong>, copie apenas o endereço dentro de <code>src="..."</code>.<br />
+                  O link direto começa com <code>https://i.ibb.co/</code>
+                </div>
+              )}
               {/* Live preview */}
-              {form.imagem_url && (
+              {form.imagem_url && !isIbbPageLink(form.imagem_url) && (
                 <div style={{ marginTop: 10 }}>
                   {imgPreviewError ? (
                     <div style={{
@@ -805,9 +822,7 @@ function PackageManager() {
                       border: '1px solid rgba(239,68,68,0.3)', borderRadius: 8,
                       fontSize: '0.82rem', color: '#ef4444',
                     }}>
-                      ⚠️ Imagem não carregou. Verifique se o link é um <strong>link direto</strong> da imagem
-                      (deve terminar em .jpg, .png, .webp etc.).<br />
-                      No ImgBB, use o link <strong>“Direct link”</strong> (começa com <code>i.ibb.co</code>), não a página <code>ibb.co</code>.
+                      ⚠️ Imagem não carregou. Verifique se o link é um <strong>link direto</strong>.
                     </div>
                   ) : (
                     <img
@@ -824,7 +839,7 @@ function PackageManager() {
                 </div>
               )}
               <span className="field-helper" style={{ marginTop: 6 }}>
-                Use o “Direct link” do ImgBB (começa com <strong>i.ibb.co</strong>) ou qualquer URL terminada em .jpg/.png/.webp
+                Use o link que começa com <strong>i.ibb.co</strong> (não ibb.co)
               </span>
             </div>
             <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
@@ -891,6 +906,23 @@ function PackageManager() {
                     <button className="btn btn-ghost" onClick={() => toggleAtivo(p.id, p.ativo)}>
                       {p.ativo ? '🔴' : '🟢'}
                     </button>
+                    {confirmDelPkg === p.id ? (
+                      <>
+                        <button onClick={() => deletePkg(p.id)} disabled={deletingPkg}
+                          style={{ padding: '3px 10px', borderRadius: 4, border: 'none', background: '#ef4444', color: '#fff', cursor: 'pointer', fontSize: '0.78rem', fontWeight: 700, marginLeft: 4 }}>
+                          {deletingPkg ? '...' : 'Confirmar'}
+                        </button>
+                        <button onClick={() => setConfirmDelPkg(null)}
+                          style={{ padding: '3px 8px', borderRadius: 4, border: '1px solid var(--color-surface-border)', background: 'transparent', color: 'var(--color-text-secondary)', cursor: 'pointer', fontSize: '0.78rem', marginLeft: 4 }}>
+                          Não
+                        </button>
+                      </>
+                    ) : (
+                      <button className="btn btn-ghost" style={{ color: '#ef4444' }}
+                        onClick={() => setConfirmDelPkg(p.id)} title="Excluir pacote">
+                        🗑️
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -910,6 +942,12 @@ function EquipmentManager() {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<any | null>(null);
   const [form, setForm] = useState({ nome: '', descricao: '', imagem_url: '', ativo: true, ordem: 1 });
+  const [imgEqPreviewError, setImgEqPreviewError] = useState(false);
+  const [confirmDelEq,  setConfirmDelEq]  = useState<string | null>(null);
+  const [deletingEq,    setDeletingEq]    = useState(false);
+
+  const isIbbPageLinkEq = (url: string) =>
+    /^https?:\/\/(www\.)?ibb\.co\/[A-Za-z0-9]+$/.test(url.trim());
 
   useEffect(() => { loadEquipments(); }, []);
 
@@ -933,6 +971,17 @@ function EquipmentManager() {
   const toggleAtivo = async (id: string, ativo: boolean) => {
     await supabase.from('equipamentos').update({ ativo: !ativo }).eq('id', id);
     loadEquipments();
+  };
+
+  const deleteEq = async (id: string) => {
+    setDeletingEq(true);
+    try {
+      await supabase.from('equipamentos').delete().eq('id', id);
+      setConfirmDelEq(null);
+      loadEquipments();
+    } finally {
+      setDeletingEq(false);
+    }
   };
 
   return (
@@ -962,8 +1011,25 @@ function EquipmentManager() {
               <textarea className="field-input" rows={2} value={form.descricao} onChange={e => setForm(f => ({ ...f, descricao: e.target.value }))} />
             </div>
             <div className="field-wrapper">
-              <label className="field-label">URL da imagem</label>
-              <input className="field-input" value={form.imagem_url} onChange={e => setForm(f => ({ ...f, imagem_url: e.target.value }))} placeholder="https://..." />
+              <label className="field-label">URL da imagem (link direto)</label>
+              <input className="field-input" value={form.imagem_url}
+                onChange={e => { setImgEqPreviewError(false); setForm(f => ({ ...f, imagem_url: e.target.value })); }}
+                placeholder="https://i.ibb.co/..."
+              />
+              {form.imagem_url && isIbbPageLinkEq(form.imagem_url) && (
+                <div style={{ marginTop: 8, padding: '10px 14px', background: 'rgba(247,148,29,0.08)', border: '1px solid rgba(247,148,29,0.3)', borderRadius: 8, fontSize: '0.82rem', color: 'var(--color-secondary)' }}>
+                  ⚠️ Link de página ImgBB. Use o link que começa com <code>https://i.ibb.co/</code>
+                </div>
+              )}
+              {form.imagem_url && !isIbbPageLinkEq(form.imagem_url) && (
+                <div style={{ marginTop: 8 }}>
+                  {imgEqPreviewError
+                    ? <span style={{ fontSize: '0.8rem', color: '#ef4444' }}>⚠️ Link inválido ou imagem inacessível</span>
+                    : <img src={form.imagem_url} alt="Preview" onError={() => setImgEqPreviewError(true)} onLoad={() => setImgEqPreviewError(false)}
+                        style={{ maxHeight: 120, maxWidth: '100%', borderRadius: 8, border: '1px solid var(--color-surface-border)', objectFit: 'cover' }} />
+                  }
+                </div>
+              )}
             </div>
             <div style={{ display: 'flex', gap: 16 }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.875rem', cursor: 'pointer' }}>
@@ -989,17 +1055,44 @@ function EquipmentManager() {
         <div className="admin-table-wrapper">
           <table className="admin-table">
             <thead>
-              <tr><th>Ordem</th><th>Nome</th><th>Status</th><th>Ações</th></tr>
+              <tr><th>Img</th><th>Ordem</th><th>Nome</th><th>Status</th><th>Ações</th></tr>
             </thead>
             <tbody>
               {equipments.map(eq => (
                 <tr key={eq.id}>
+                  <td style={{ width: 52 }}>
+                    {eq.imagem_url && !isIbbPageLinkEq(eq.imagem_url) ? (
+                      <img src={eq.imagem_url} alt={eq.nome}
+                        style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--color-surface-border)' }}
+                        onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                      />
+                    ) : (
+                      <div style={{ width: 44, height: 44, background: 'var(--color-surface-hover)', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem' }}>📸</div>
+                    )}
+                  </td>
                   <td>{eq.ordem}</td>
                   <td>{eq.nome}</td>
                   <td><span className={`badge ${eq.ativo ? 'badge-ok' : 'badge-warn'}`}>{eq.ativo ? 'Ativo' : 'Inativo'}</span></td>
                   <td>
-                    <button className="btn btn-ghost" onClick={() => { setEditing(eq); setForm({ nome: eq.nome, descricao: eq.descricao || '', imagem_url: eq.imagem_url || '', ativo: eq.ativo, ordem: eq.ordem }); }}>✏️</button>
+                    <button className="btn btn-ghost" onClick={() => { setImgEqPreviewError(false); setEditing(eq); setForm({ nome: eq.nome, descricao: eq.descricao || '', imagem_url: eq.imagem_url || '', ativo: eq.ativo, ordem: eq.ordem }); }}>✏️</button>
                     <button className="btn btn-ghost" onClick={() => toggleAtivo(eq.id, eq.ativo)}>{eq.ativo ? '🔴' : '🟢'}</button>
+                    {confirmDelEq === eq.id ? (
+                      <>
+                        <button onClick={() => deleteEq(eq.id)} disabled={deletingEq}
+                          style={{ padding: '3px 10px', borderRadius: 4, border: 'none', background: '#ef4444', color: '#fff', cursor: 'pointer', fontSize: '0.78rem', fontWeight: 700, marginLeft: 4 }}>
+                          {deletingEq ? '...' : 'Confirmar'}
+                        </button>
+                        <button onClick={() => setConfirmDelEq(null)}
+                          style={{ padding: '3px 8px', borderRadius: 4, border: '1px solid var(--color-surface-border)', background: 'transparent', color: 'var(--color-text-secondary)', cursor: 'pointer', fontSize: '0.78rem', marginLeft: 4 }}>
+                          Não
+                        </button>
+                      </>
+                    ) : (
+                      <button className="btn btn-ghost" style={{ color: '#ef4444' }}
+                        onClick={() => setConfirmDelEq(eq.id)} title="Excluir equipamento">
+                        🗑️
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
