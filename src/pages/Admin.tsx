@@ -716,8 +716,15 @@ function PackageManager() {
   const [confirmDelPkg, setConfirmDelPkg] = useState<string | null>(null);
   const [deletingPkg,   setDeletingPkg]   = useState(false);
 
-  const isIbbPageLink = (url: string) =>
-    /^https?:\/\/(www\.)?ibb\.co\/[A-Za-z0-9]+$/.test(url.trim());
+  // Detect Google Photos PAGE links (not embeddable)
+  const isGooglePhotosPageLink = (url: string) =>
+    /photos\.app\.goo\.gl|photos\.google\.com\/photo|photos\.google\.com\/album/i.test(url.trim());
+
+  // A valid direct image URL ends with an image extension or is from a known image CDN
+  const isDirectImageUrl = (url: string) => {
+    if (!url) return false;
+    return /lh3\.googleusercontent\.com|\.(jpg|jpeg|png|webp|gif)(\?.*)?$/i.test(url.trim());
+  };
 
   const handleImageUrl = (raw: string) => {
     setImgPreviewError(false);
@@ -793,28 +800,31 @@ function PackageManager() {
               <textarea className="field-input" rows={2} value={form.descricao} onChange={e => setForm(f => ({ ...f, descricao: e.target.value }))} />
             </div>
             <div className="field-wrapper">
-              <label className="field-label">URL da imagem (link direto)</label>
+              <label className="field-label">URL da imagem</label>
               <input
                 className="field-input"
                 value={form.imagem_url}
                 onChange={e => handleImageUrl(e.target.value)}
-                placeholder="https://i.ibb.co/... ou outro link direto"
+                placeholder="Cole o link lh3.googleusercontent.com aqui"
               />
-              {/* ImgBB page link warning */}
-              {form.imagem_url && isIbbPageLink(form.imagem_url) && (
+              {/* Google Photos PAGE link warning */}
+              {form.imagem_url && isGooglePhotosPageLink(form.imagem_url) && (
                 <div style={{
-                  marginTop: 8, padding: '10px 14px',
-                  background: 'rgba(247,148,29,0.08)', border: '1px solid rgba(247,148,29,0.3)',
-                  borderRadius: 8, fontSize: '0.82rem', color: 'var(--color-secondary)',
+                  marginTop: 8, padding: '12px 14px',
+                  background: 'rgba(66,133,244,0.08)', border: '1px solid rgba(66,133,244,0.3)',
+                  borderRadius: 8, fontSize: '0.82rem', color: '#4285f4', lineHeight: 1.6,
                 }}>
-                  ⚠️ Este é o link da <strong>página</strong> do ImgBB, não da imagem.<br />
-                  No ImgBB, clique em <strong>"&lt;/&gt; Códigos para Incorporar"</strong> e no campo
-                  <strong> "Imagem completa &gt; HTML"</strong>, copie apenas o endereço dentro de <code>src="..."</code>.<br />
-                  O link direto começa com <code>https://i.ibb.co/</code>
+                  ⚠️ Este é o link da <strong>página</strong> do Google Fotos, não da imagem.<br />
+                  Para obter o link direto da imagem:<br />
+                  1. Abra a foto no Google Fotos no <strong>computador</strong><br />
+                  2. Clique com o botão direito na imagem<br />
+                  3. Clique em <strong>“Copiar endereço da imagem”</strong> (Chrome/Edge)<br />
+                  4. O link começará com <code>https://lh3.googleusercontent.com/</code><br />
+                  Cole esse link aqui.
                 </div>
               )}
-              {/* Live preview */}
-              {form.imagem_url && !isIbbPageLink(form.imagem_url) && (
+              {/* Live preview - only for non-page links */}
+              {form.imagem_url && !isGooglePhotosPageLink(form.imagem_url) && (
                 <div style={{ marginTop: 10 }}>
                   {imgPreviewError ? (
                     <div style={{
@@ -822,7 +832,7 @@ function PackageManager() {
                       border: '1px solid rgba(239,68,68,0.3)', borderRadius: 8,
                       fontSize: '0.82rem', color: '#ef4444',
                     }}>
-                      ⚠️ Imagem não carregou. Verifique se o link é um <strong>link direto</strong>.
+                      ⚠️ Imagem não carregou. Verifique se o link é o endereço direto da imagem (começa com <code>lh3.googleusercontent.com</code>).
                     </div>
                   ) : (
                     <img
@@ -831,7 +841,7 @@ function PackageManager() {
                       onError={() => setImgPreviewError(true)}
                       onLoad={() => setImgPreviewError(false)}
                       style={{
-                        maxHeight: 140, maxWidth: '100%', borderRadius: 8,
+                        maxHeight: 160, maxWidth: '100%', borderRadius: 8,
                         border: '1px solid var(--color-surface-border)', objectFit: 'cover',
                       }}
                     />
@@ -839,7 +849,7 @@ function PackageManager() {
                 </div>
               )}
               <span className="field-helper" style={{ marginTop: 6 }}>
-                Use o link que começa com <strong>i.ibb.co</strong> (não ibb.co)
+                Clique com o botão direito na foto no Google Fotos → <strong>"Copiar endereço da imagem"</strong>
               </span>
             </div>
             <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
@@ -946,8 +956,8 @@ function EquipmentManager() {
   const [confirmDelEq,  setConfirmDelEq]  = useState<string | null>(null);
   const [deletingEq,    setDeletingEq]    = useState(false);
 
-  const isIbbPageLinkEq = (url: string) =>
-    /^https?:\/\/(www\.)?ibb\.co\/[A-Za-z0-9]+$/.test(url.trim());
+  const isGooglePhotosPageLinkEq = (url: string) =>
+    /photos\.app\.goo\.gl|photos\.google\.com\/photo|photos\.google\.com\/album/i.test(url.trim());
 
   useEffect(() => { loadEquipments(); }, []);
 
@@ -1011,25 +1021,32 @@ function EquipmentManager() {
               <textarea className="field-input" rows={2} value={form.descricao} onChange={e => setForm(f => ({ ...f, descricao: e.target.value }))} />
             </div>
             <div className="field-wrapper">
-              <label className="field-label">URL da imagem (link direto)</label>
+              <label className="field-label">URL da imagem</label>
               <input className="field-input" value={form.imagem_url}
                 onChange={e => { setImgEqPreviewError(false); setForm(f => ({ ...f, imagem_url: e.target.value })); }}
-                placeholder="https://i.ibb.co/..."
+                placeholder="Cole o link lh3.googleusercontent.com aqui"
               />
-              {form.imagem_url && isIbbPageLinkEq(form.imagem_url) && (
-                <div style={{ marginTop: 8, padding: '10px 14px', background: 'rgba(247,148,29,0.08)', border: '1px solid rgba(247,148,29,0.3)', borderRadius: 8, fontSize: '0.82rem', color: 'var(--color-secondary)' }}>
-                  ⚠️ Link de página ImgBB. Use o link que começa com <code>https://i.ibb.co/</code>
+              {form.imagem_url && isGooglePhotosPageLinkEq(form.imagem_url) && (
+                <div style={{ marginTop: 8, padding: '12px 14px', background: 'rgba(66,133,244,0.08)', border: '1px solid rgba(66,133,244,0.3)', borderRadius: 8, fontSize: '0.82rem', color: '#4285f4', lineHeight: 1.6 }}>
+                  ⚠️ Este é o link da <strong>página</strong> do Google Fotos, não da imagem.<br />
+                  1. Abra a foto no Google Fotos no <strong>computador</strong><br />
+                  2. Clique com o botão direito na imagem<br />
+                  3. Clique em <strong>"Copiar endereço da imagem"</strong><br />
+                  4. Cole o link que começa com <code>https://lh3.googleusercontent.com/</code>
                 </div>
               )}
-              {form.imagem_url && !isIbbPageLinkEq(form.imagem_url) && (
+              {form.imagem_url && !isGooglePhotosPageLinkEq(form.imagem_url) && (
                 <div style={{ marginTop: 8 }}>
                   {imgEqPreviewError
-                    ? <span style={{ fontSize: '0.8rem', color: '#ef4444' }}>⚠️ Link inválido ou imagem inacessível</span>
+                    ? <span style={{ fontSize: '0.8rem', color: '#ef4444' }}>⚠️ Imagem não carregou. Verifique se é o endereço direto (<code>lh3.googleusercontent.com</code>)</span>
                     : <img src={form.imagem_url} alt="Preview" onError={() => setImgEqPreviewError(true)} onLoad={() => setImgEqPreviewError(false)}
-                        style={{ maxHeight: 120, maxWidth: '100%', borderRadius: 8, border: '1px solid var(--color-surface-border)', objectFit: 'cover' }} />
+                        style={{ maxHeight: 160, maxWidth: '100%', borderRadius: 8, border: '1px solid var(--color-surface-border)', objectFit: 'cover' }} />
                   }
                 </div>
               )}
+              <span className="field-helper" style={{ marginTop: 6 }}>
+                Clique com o botão direito na foto no Google Fotos → <strong>"Copiar endereço da imagem"</strong>
+              </span>
             </div>
             <div style={{ display: 'flex', gap: 16 }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.875rem', cursor: 'pointer' }}>
@@ -1049,6 +1066,7 @@ function EquipmentManager() {
         </div>
       )}
 
+
       {loading ? (
         <div className="loading-overlay"><div className="spinner" /></div>
       ) : (
@@ -1061,7 +1079,7 @@ function EquipmentManager() {
               {equipments.map(eq => (
                 <tr key={eq.id}>
                   <td style={{ width: 52 }}>
-                    {eq.imagem_url && !isIbbPageLinkEq(eq.imagem_url) ? (
+                    {eq.imagem_url && !isGooglePhotosPageLinkEq(eq.imagem_url) ? (
                       <img src={eq.imagem_url} alt={eq.nome}
                         style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--color-surface-border)' }}
                         onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
