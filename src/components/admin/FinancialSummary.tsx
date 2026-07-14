@@ -46,6 +46,8 @@ export function FinancialSummary() {
   const [toggling,   setToggling]   = useState<string | null>(null);
   const [editingNF,  setEditingNF]  = useState<string | null>(null);
   const [nfForm,     setNfForm]     = useState({ data_emissao_nf: '', numero_nf: '' });
+  const [confirmDelRec, setConfirmDelRec] = useState<string | null>(null);
+  const [deleting,   setDeleting]   = useState(false);
 
   // Date / period filter
   const [dateFrom, setDateFrom] = useState('');
@@ -113,6 +115,17 @@ export function FinancialSummary() {
       setEditingNF(null);
       await load();
     } finally { setToggling(null); }
+  };
+
+  const handleDeleteRec = async (id: string) => {
+    setDeleting(true);
+    try {
+      await supabase.from('controle_recebimentos').delete().eq('id', id);
+      setConfirmDelRec(null);
+      await load();
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const handleSort = (field: SortField) => {
@@ -385,6 +398,7 @@ export function FinancialSummary() {
                 { label: 'Total',        field: 'valor_total_contrato' },
                 { label: 'NF Emitida',   field: null                   },
                 { label: 'Nº NF',        field: null                   },
+                { label: 'Ações',        field: null                   },
               ] as { label: string; field: SortField | null }[]).map(h => (
                 <th
                   key={h.label}
@@ -469,6 +483,34 @@ export function FinancialSummary() {
                         <div style={{ fontSize: '0.7rem', color: 'var(--color-muted)' }}>
                           {new Date(rec.data_emissao_nf + 'T00:00:00').toLocaleDateString('pt-BR')}
                         </div>
+                      )}
+                    </td>
+                    <td style={{ padding: '6px 8px' }}>
+                      {confirmDelRec === rec.id ? (
+                        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                          <span style={{ fontSize: '0.75rem', color: '#ef4444', whiteSpace: 'nowrap' }}>Confirmar?</span>
+                          <button
+                            onClick={() => handleDeleteRec(rec.id)}
+                            disabled={deleting}
+                            style={{ padding: '2px 8px', borderRadius: 4, border: 'none', background: '#ef4444', color: '#fff', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 700 }}
+                          >
+                            {deleting ? '...' : 'Sim'}
+                          </button>
+                          <button
+                            onClick={() => setConfirmDelRec(null)}
+                            style={{ padding: '2px 8px', borderRadius: 4, border: '1px solid var(--color-surface-border)', background: 'transparent', color: 'var(--color-text-secondary)', cursor: 'pointer', fontSize: '0.75rem' }}
+                          >
+                            Não
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          onClick={() => setConfirmDelRec(rec.id)}
+                          style={{ padding: '3px 8px', borderRadius: 4, border: '1px solid rgba(239,68,68,0.3)', background: 'transparent', color: '#ef4444', cursor: 'pointer', fontSize: '0.78rem' }}
+                          title="Excluir registro financeiro"
+                        >
+                          🗑️
+                        </button>
                       )}
                     </td>
                   </tr>

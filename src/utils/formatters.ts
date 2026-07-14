@@ -6,7 +6,10 @@ export function formatBRL(value: number | null | undefined): string {
 export function formatDate(isoDate: string | null | undefined): string {
   if (!isoDate) return '—';
   try {
-    return new Date(isoDate + 'T12:00:00').toLocaleDateString('pt-BR');
+    // handles YYYY-MM-DD and ISO datetime strings
+    const d = new Date(isoDate.length <= 10 ? isoDate + 'T12:00:00' : isoDate);
+    if (isNaN(d.getTime())) return isoDate;
+    return d.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
   } catch {
     return isoDate;
   }
@@ -15,7 +18,9 @@ export function formatDate(isoDate: string | null | undefined): string {
 export function formatDateTime(iso: string | null | undefined): string {
   if (!iso) return '—';
   try {
-    return new Date(iso).toLocaleString('pt-BR');
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    return d.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
   } catch {
     return iso;
   }

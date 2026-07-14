@@ -47,6 +47,8 @@ export function Admin() {
   const [stats, setStats] = useState({ total: 0, pf: 0, pj: 0, thisMonth: 0 });
   const [showImportModal, setShowImportModal] = useState(false);
   const [historicoSearch, setHistoricoSearch] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -99,6 +101,19 @@ export function Admin() {
   const handleLogout = async () => {
     await supabase.auth.signOut();
     navigate('/admin/login');
+  };
+
+  const handleDeleteForm = async (id: string) => {
+    setDeleteLoading(true);
+    try {
+      await supabase.from('controle_recebimentos').delete().eq('formulario_evento_id', id);
+      await supabase.from('formularios_eventos').delete().eq('id', id);
+      setConfirmDelete(null);
+      setSelectedForm(null);
+      loadForms();
+    } finally {
+      setDeleteLoading(false);
+    }
   };
 
   const exportCSV = () => {
@@ -262,6 +277,7 @@ export function Admin() {
                       <th>Cidade</th>
                       <th>Pacote</th>
                       <th>Enviado em</th>
+                      <th>Ações</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -272,25 +288,43 @@ export function Admin() {
                         </td>
                       </tr>
                     ) : filteredForms.map(f => (
-                      <tr key={f.id} onClick={() => setSelectedForm(f)}>
-                        <td>
+                      <tr key={f.id}>
+                        <td onClick={() => setSelectedForm(f)} style={{ cursor: 'pointer' }}>
                           <code style={{ fontSize: '0.8rem', color: 'var(--color-secondary)' }}>
                             {f.protocolo}
                           </code>
                         </td>
-                        <td>
+                        <td onClick={() => setSelectedForm(f)} style={{ cursor: 'pointer' }}>
                           <span className={`badge badge-${f.tipo_pessoa?.toLowerCase()}`}>
                             {f.tipo_pessoa}
                           </span>
                         </td>
-                        <td style={{ maxWidth: 200 }}>
+                        <td style={{ maxWidth: 200, cursor: 'pointer' }} onClick={() => setSelectedForm(f)}>
                           {f.tipo_pessoa === 'PF' ? f.nome_contratante : (f.nome_fantasia || f.nome_responsavel)}
                         </td>
-                        <td>{formatDate(f.data_evento)}</td>
-                        <td>{f.cidade_evento || '—'}</td>
-                        <td style={{ fontSize: '0.8rem' }}>{f.pacote_nome_snapshot || '—'}</td>
-                        <td style={{ fontSize: '0.8rem', color: 'var(--color-muted)' }}>
-                          {formatDate(f.created_at)}
+                        <td onClick={() => setSelectedForm(f)} style={{ cursor: 'pointer' }}>{formatDate(f.data_evento)}</td>
+                        <td onClick={() => setSelectedForm(f)} style={{ cursor: 'pointer' }}>{f.cidade_evento || '—'}</td>
+                        <td onClick={() => setSelectedForm(f)} style={{ fontSize: '0.8rem', cursor: 'pointer' }}>{f.pacote_nome_snapshot || '—'}</td>
+                        <td onClick={() => setSelectedForm(f)} style={{ fontSize: '0.8rem', color: 'var(--color-muted)', cursor: 'pointer' }}>
+                          {formatDateTime(f.created_at)}
+                        </td>
+                        <td style={{ whiteSpace: 'nowrap' }}>
+                          <button
+                            className="btn btn-ghost"
+                            style={{ padding: '4px 10px', fontSize: '0.8rem' }}
+                            onClick={() => setSelectedForm(f)}
+                            title="Ver / editar"
+                          >
+                            ✏️
+                          </button>
+                          <button
+                            className="btn btn-ghost"
+                            style={{ padding: '4px 10px', fontSize: '0.8rem', color: '#ef4444' }}
+                            onClick={() => setConfirmDelete(f.id)}
+                            title="Excluir"
+                          >
+                            🗑️
+                          </button>
                         </td>
                       </tr>
                     ))}
@@ -303,7 +337,11 @@ export function Admin() {
 
         {/* ─── DETALHE DO FORMULÁRIO ─── */}
         {activeTab === 'formularios' && selectedForm && (
-          <FormDetail form={selectedForm} onBack={() => setSelectedForm(null)} />
+          <FormDetail
+            form={selectedForm}
+            onBack={() => setSelectedForm(null)}
+            onDelete={(id) => handleDeleteForm(id)}
+          />
         )}
 
         {/* ─── HISTÓRICO ─── */}
@@ -411,15 +449,114 @@ export function Admin() {
           onSuccess={() => { loadHistorico(); setActiveTab('historico'); }}
         />
       )}
+
+      {/* Confirm Delete Modal */}
+      {confirmDelete && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 1000, padding: 20,
+        }}>
+          <div style={{
+            background: 'var(--color-surface)', borderRadius: 16,
+            padding: '28px 32px', maxWidth: 420, width: '100%',
+            border: '1px solid var(--color-surface-border)', textAlign: 'center',
+          }}>
+            <div style={{ fontSize: '2.5rem', marginBottom: 12 }}>🗑️</div>
+            <div style={{ fontWeight: 700, fontSize: '1.1rem', color: 'var(--color-text)', marginBottom: 8 }}>
+              Excluir registro?
+            </div>
+            <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.9rem', marginBottom: 24 }}>
+              Esta ação é permanente. O formulário e os dados financeiros vinculados serão excluídos.
+            </p>
+            <div style={{ display: 'flex', gap: 12, justifyContent: 'center' }}>
+              <button
+                className="btn btn-secondary"
+                onClick={() => setConfirmDelete(null)}
+                disabled={deleteLoading}
+              >
+                Cancelar
+              </button>
+              <button
+                className="btn btn-primary"
+                style={{ background: '#ef4444', borderColor: '#ef4444' }}
+                onClick={() => handleDeleteForm(confirmDelete)}
+                disabled={deleteLoading}
+              >
+                {deleteLoading ? 'Excluindo...' : '✕ Excluir definitivamente'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 // ─────────────────────────────────────────────────────────
-// Form Detail Component
+// Form Detail Component (com edição e exclusão)
 // ─────────────────────────────────────────────────────────
-function FormDetail({ form, onBack }: { form: FormRecord; onBack: () => void }) {
+function FormDetail({
+  form, onBack, onDelete,
+}: {
+  form: FormRecord;
+  onBack: () => void;
+  onDelete: (id: string) => void;
+}) {
   const isPF = form.tipo_pessoa === 'PF';
+  const fa = form as any;
+
+  // edit state
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(false);
+  const [edited, setEdited] = useState({
+    nome_evento:    form.nome_evento    || '',
+    data_evento:    fa.data_evento      || '',
+    horario_inicio_evento: fa.horario_inicio_evento || '',
+    horario_inicio_fotos:  fa.horario_inicio_fotos  || '',
+    cidade_evento:  form.cidade_evento  || '',
+    logradouro_evento: fa.logradouro_evento || '',
+    numero_evento:  fa.numero_evento    || '',
+    complemento_evento: fa.complemento_evento || '',
+    bairro_evento:  fa.bairro_evento    || '',
+    forma_pagamento: form.forma_pagamento || '',
+    quantidade_horas: form.quantidade_horas || '',
+    pacote_nome_snapshot: form.pacote_nome_snapshot || '',
+    equipamento_nome_snapshot: form.equipamento_nome_snapshot || '',
+    comentarios:    form.comentarios    || '',
+    email:          form.email          || '',
+    telefone:       form.telefone       || '',
+    contato_cerimonial: fa.contato_cerimonial || '',
+  });
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await supabase.from('formularios_eventos').update(edited).eq('id', form.id);
+      setEditing(false);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const Field = ({ label, field, type = 'text' }: { label: string; field: keyof typeof edited; type?: string }) => (
+    <div className="review-field">
+      <span className="review-field-label">{label}</span>
+      {editing ? (
+        <input
+          type={type}
+          className="field-input"
+          style={{ fontSize: '0.85rem', padding: '4px 8px', maxWidth: 320 }}
+          value={edited[field]}
+          onChange={e => setEdited(p => ({ ...p, [field]: e.target.value }))}
+        />
+      ) : (
+        <span className="review-field-value">{(edited[field] as string) || '—'}</span>
+      )}
+    </div>
+  );
+
   const Row = ({ label, value }: { label: string; value: string | null | undefined }) => {
     if (!value) return null;
     return (
@@ -429,23 +566,69 @@ function FormDetail({ form, onBack }: { form: FormRecord; onBack: () => void }) 
       </div>
     );
   };
+
   return (
     <div>
-      <button className="btn btn-ghost" onClick={onBack} style={{ marginBottom: 16 }}>
-        ← Voltar à lista
-      </button>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
-        <div>
-          <div style={{ fontSize: '1.3rem', fontWeight: 700, color: 'var(--color-text)' }}>
-            {isPF ? form.nome_contratante : form.nome_fantasia}
-          </div>
-          <div style={{ display: 'flex', gap: 8, marginTop: 4, alignItems: 'center' }}>
-            <span className={`badge badge-${form.tipo_pessoa?.toLowerCase()}`}>{form.tipo_pessoa}</span>
-            <code style={{ fontSize: '0.85rem', color: 'var(--color-secondary)' }}>{form.protocolo}</code>
-          </div>
-        </div>
+      {/* Header bar */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
+        <button className="btn btn-ghost" onClick={onBack}>← Voltar à lista</button>
+        <div style={{ flex: 1 }} />
+        {!editing ? (
+          <>
+            <button
+              className="btn btn-secondary"
+              onClick={() => setEditing(true)}
+            >
+              ✏️ Editar
+            </button>
+            <button
+              className="btn btn-ghost"
+              style={{ color: '#ef4444', borderColor: '#ef4444' }}
+              onClick={() => setConfirmDel(true)}
+            >
+              🗑️ Excluir
+            </button>
+          </>
+        ) : (
+          <>
+            <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+              {saving ? 'Salvando...' : '✓ Salvar alterações'}
+            </button>
+            <button className="btn btn-ghost" onClick={() => setEditing(false)}>Cancelar</button>
+          </>
+        )}
       </div>
 
+      {/* Confirm delete inline */}
+      {confirmDel && (
+        <div style={{
+          background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)',
+          borderRadius: 10, padding: '16px 20px', marginBottom: 16,
+          display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap',
+        }}>
+          <span style={{ color: '#ef4444', fontWeight: 600, flex: 1 }}>
+            Tem certeza? Esta ação é permanente e removerá também os dados financeiros.
+          </span>
+          <button
+            className="btn btn-primary"
+            style={{ background: '#ef4444', borderColor: '#ef4444' }}
+            onClick={() => onDelete(form.id)}
+          >
+            ✕ Excluir
+          </button>
+          <button className="btn btn-ghost" onClick={() => setConfirmDel(false)}>Cancelar</button>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 20, alignItems: 'center' }}>
+        <span className={`badge badge-${form.tipo_pessoa?.toLowerCase()}`}>{form.tipo_pessoa}</span>
+        <code style={{ fontSize: '0.85rem', color: 'var(--color-secondary)' }}>{form.protocolo}</code>
+        <span style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--color-text)', marginLeft: 8 }}>
+          {isPF ? form.nome_contratante : form.nome_fantasia}
+        </span>
+      </div>
+
+      {/* Dados pessoais / empresa (read-only) */}
       <div className="admin-card">
         <div className="review-section-title" style={{ marginBottom: 10 }}>
           {isPF ? 'Dados pessoais' : 'Dados da empresa'}
@@ -453,47 +636,65 @@ function FormDetail({ form, onBack }: { form: FormRecord; onBack: () => void }) 
         {isPF ? (
           <>
             <Row label="Nome" value={form.nome_contratante} />
-            <Row label="CPF" value={formatCPFDisplay((form as any).cpf)} />
-            <Row label="RG" value={(form as any).rg} />
-            <Row label="Nascimento" value={formatDate((form as any).data_nascimento)} />
+            <Row label="CPF" value={formatCPFDisplay(fa.cpf)} />
+            <Row label="RG" value={fa.rg} />
+            <Row label="Nascimento" value={formatDate(fa.data_nascimento)} />
           </>
         ) : (
           <>
             <Row label="Nome Fantasia" value={form.nome_fantasia} />
-            <Row label="CNPJ" value={formatCNPJDisplay((form as any).cnpj)} />
+            <Row label="CNPJ" value={formatCNPJDisplay(fa.cnpj)} />
             <Row label="Responsável" value={form.nome_responsavel} />
           </>
         )}
-        <Row label="E-mail" value={form.email} />
-        <Row label="Telefone" value={formatPhone(form.telefone)} />
+        <Field label="E-mail" field="email" type="email" />
+        <Field label="Telefone" field="telefone" />
+        <Field label="Contato cerimonial" field="contato_cerimonial" />
       </div>
 
+      {/* Dados do evento */}
       <div className="admin-card">
         <div className="review-section-title" style={{ marginBottom: 10 }}>Dados do evento</div>
-        <Row label="Nome do evento" value={form.nome_evento} />
-        <Row label="Data" value={formatDate(form.data_evento)} />
-        <Row label="Início" value={(form as any).horario_inicio_evento} />
-        <Row label="Início fotos" value={(form as any).horario_inicio_fotos} />
-        <Row label="Cidade" value={form.cidade_evento} />
-        <Row label="Forma pag." value={form.forma_pagamento} />
-        <Row label="Horas" value={form.quantidade_horas} />
-        <Row label="Pacote" value={form.pacote_nome_snapshot} />
-        <Row label="Equipamento" value={form.equipamento_nome_snapshot} />
+        <Field label="Nome do evento" field="nome_evento" />
+        <Field label="Data" field="data_evento" type="date" />
+        <Field label="Início evento" field="horario_inicio_evento" type="time" />
+        <Field label="Início fotos" field="horario_inicio_fotos" type="time" />
+        <Field label="Cidade" field="cidade_evento" />
+        <Field label="Logradouro" field="logradouro_evento" />
+        <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ flex: 1 }}><Field label="Número" field="numero_evento" /></div>
+          <div style={{ flex: 2 }}><Field label="Complemento" field="complemento_evento" /></div>
+        </div>
+        <Field label="Bairro" field="bairro_evento" />
+        <Field label="Forma de pagamento" field="forma_pagamento" />
+        <Field label="Horas" field="quantidade_horas" />
+        <Field label="Pacote" field="pacote_nome_snapshot" />
+        <Field label="Equipamento" field="equipamento_nome_snapshot" />
         <Row label="Publicação fotos" value={
           form.autoriza_publicacao_fotos === true ? 'Autorizado' :
           form.autoriza_publicacao_fotos === false ? 'Não autorizado' : '—'
         } />
       </div>
 
-      {form.comentarios && (
-        <div className="admin-card">
-          <div className="review-section-title" style={{ marginBottom: 10 }}>Comentários</div>
+      {/* Comentários */}
+      <div className="admin-card">
+        <div className="review-section-title" style={{ marginBottom: 10 }}>Comentários</div>
+        {editing ? (
+          <textarea
+            className="field-input"
+            rows={4}
+            style={{ fontSize: '0.85rem' }}
+            value={edited.comentarios}
+            onChange={e => setEdited(p => ({ ...p, comentarios: e.target.value }))}
+          />
+        ) : (
           <p style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)', lineHeight: 1.6 }}>
-            {form.comentarios}
+            {edited.comentarios || '—'}
           </p>
-        </div>
-      )}
+        )}
+      </div>
 
+      {/* Metadata */}
       <div className="admin-card">
         <div className="review-section-title" style={{ marginBottom: 10 }}>Metadata</div>
         <Row label="Protocolo" value={form.protocolo} />
