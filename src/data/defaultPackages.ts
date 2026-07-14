@@ -1,0 +1,48 @@
+import type { Pacote } from '../types/form.types';
+
+export const DEFAULT_PACKAGES: Pacote[] = [
+  {
+    id: 'pkg-1',
+    nome: 'Pacote 1',
+    descricao: 'Impressão térmica japonesa de alta qualidade. Formato clássico horizontal.',
+    imagem_url: '',
+    tamanho_foto: '10x15 cm',
+    permite_pf: true,
+    permite_pj: true,
+    ativo: true,
+    ordem: 1,
+  },
+  {
+    id: 'pkg-2',
+    nome: 'Pacote 2',
+    descricao: 'Duas fotos em tira vertical por sessão. Ideal para molduras criativas.',
+    imagem_url: '',
+    tamanho_foto: '5x15 cm',
+    permite_pf: true,
+    permite_pj: true,
+    ativo: true,
+    ordem: 2,
+  },
+  {
+    id: 'pkg-3-pf',
+    nome: 'Pacote 3',
+    descricao: 'Estilo Polaroid retrô. Perfeito para festas temáticas e eventos especiais.',
+    imagem_url: '',
+    tamanho_foto: '7,5x10 cm',
+    permite_pf: true,
+    permite_pj: false,
+    ativo: true,
+    ordem: 3,
+  },
+  {
+    id: 'pkg-3-pj',
+    nome: 'Pacote 3',
+    descricao: 'Fotos no estilo Polaroid. Ótimo para eventos corporativos e confraternizações.',
+    imagem_url: '',
+    tamanho_foto: '7,5x10 cm — Polaroid',
+    permite_pf: false,
+    permite_pj: true,
+    ativo: true,
+    ordem: 3,
+  },
+];
