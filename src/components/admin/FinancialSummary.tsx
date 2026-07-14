@@ -48,6 +48,9 @@ export function FinancialSummary() {
   const [nfForm,     setNfForm]     = useState({ data_emissao_nf: '', numero_nf: '' });
   const [confirmDelRec, setConfirmDelRec] = useState<string | null>(null);
   const [deleting,   setDeleting]   = useState(false);
+  const [markingPago, setMarkingPago] = useState<string | null>(null);
+  const [confirmMarkPago, setConfirmMarkPago] = useState<string | null>(null);
+  const [pagoFilter, setPagoFilter] = useState<'all' | 'a_receber' | 'quitado'>('all');
 
   // Date / period filter
   const [dateFrom, setDateFrom] = useState('');
@@ -128,6 +131,23 @@ export function FinancialSummary() {
     }
   };
 
+  const handleMarkAsPago = async (rec: RecebimentoRecord) => {
+    setMarkingPago(rec.id);
+    try {
+      await supabase
+        .from('controle_recebimentos')
+        .update({
+          valor_pago: rec.valor_total_contrato,
+          valor_a_pagar: 0,
+        })
+        .eq('id', rec.id);
+      setConfirmMarkPago(null);
+      await load();
+    } finally {
+      setMarkingPago(null);
+    }
+  };
+
   const handleSort = (field: SortField) => {
     if (sortField === field) {
       setSortDir(d => d === 'asc' ? 'desc' : 'asc');
@@ -147,6 +167,10 @@ export function FinancialSummary() {
     // NF filter
     if (nfFilter === 'com_nf' && !r.nota_fiscal_emitida) return false;
     if (nfFilter === 'sem_nf' && r.nota_fiscal_emitida)  return false;
+
+    // Pago/A receber filter
+    if (pagoFilter === 'a_receber' && Number(r.valor_a_pagar || 0) <= 0) return false;
+    if (pagoFilter === 'quitado'   && Number(r.valor_a_pagar || 0) >  0) return false;
 
     // Date/period filter (by data_evento)
     const fe = r.formularios_eventos as any;
@@ -306,6 +330,24 @@ export function FinancialSummary() {
         gap: 16,
         alignItems: 'flex-end',
       }}>
+        {/* Situação filter chips */}
+        <div>
+          <div style={{ fontSize: '0.72rem', color: 'var(--color-muted)', marginBottom: 6, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+            Situação
+          </div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {([
+              { id: 'all',       label: 'Todos' },
+              { id: 'a_receber', label: '🔴 A receber' },
+              { id: 'quitado',   label: '✅ Quitado' },
+            ] as { id: 'all'|'a_receber'|'quitado'; label: string }[]).map(f => (
+              <button key={f.id} onClick={() => setPagoFilter(f.id)} style={chipStyle(pagoFilter === f.id)}>
+                {f.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         {/* NF filter chips */}
         <div>
           <div style={{ fontSize: '0.72rem', color: 'var(--color-muted)', marginBottom: 6, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
@@ -351,9 +393,9 @@ export function FinancialSummary() {
         </div>
 
         {/* Clear button */}
-        {(dateFrom || dateTo || nfFilter !== 'all') && (
+        {(dateFrom || dateTo || nfFilter !== 'all' || pagoFilter !== 'all') && (
           <button
-            onClick={() => { setDateFrom(''); setDateTo(''); setNfFilter('all'); }}
+            onClick={() => { setDateFrom(''); setDateTo(''); setNfFilter('all'); setPagoFilter('all'); }}
             style={{
               ...chipStyle(false),
               borderColor: 'rgba(239,68,68,0.4)',
@@ -485,10 +527,40 @@ export function FinancialSummary() {
                         </div>
                       )}
                     </td>
-                    <td style={{ padding: '6px 8px' }}>
+                    <td style={{ padding: '6px 8px', whiteSpace: 'nowrap' }}>
+                      {/* Mark as paid button */}
+                      {Number(rec.valor_a_pagar || 0) > 0 && (
+                        confirmMarkPago === rec.id ? (
+                          <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginBottom: 4 }}>
+                            <span style={{ fontSize: '0.72rem', color: '#22c55e', whiteSpace: 'nowrap' }}>Marcar como pago?</span>
+                            <button
+                              onClick={() => handleMarkAsPago(rec)}
+                              disabled={markingPago === rec.id}
+                              style={{ padding: '2px 8px', borderRadius: 4, border: 'none', background: '#22c55e', color: '#fff', cursor: 'pointer', fontSize: '0.72rem', fontWeight: 700 }}
+                            >
+                              {markingPago === rec.id ? '...' : 'Confirmar'}
+                            </button>
+                            <button
+                              onClick={() => setConfirmMarkPago(null)}
+                              style={{ padding: '2px 6px', borderRadius: 4, border: '1px solid var(--color-surface-border)', background: 'transparent', color: 'var(--color-text-secondary)', cursor: 'pointer', fontSize: '0.72rem' }}
+                            >
+                              Não
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => setConfirmMarkPago(rec.id)}
+                            title="Marcar como pago (quitar)"
+                            style={{ padding: '3px 10px', borderRadius: 4, border: '1px solid rgba(34,197,94,0.4)', background: 'rgba(34,197,94,0.08)', color: '#22c55e', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 600, display: 'block', marginBottom: 4, whiteSpace: 'nowrap' }}
+                          >
+                            ✅ Marcar pago
+                          </button>
+                        )
+                      )}
+                      {/* Delete button */}
                       {confirmDelRec === rec.id ? (
                         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                          <span style={{ fontSize: '0.75rem', color: '#ef4444', whiteSpace: 'nowrap' }}>Confirmar?</span>
+                          <span style={{ fontSize: '0.75rem', color: '#ef4444', whiteSpace: 'nowrap' }}>Excluir?</span>
                           <button
                             onClick={() => handleDeleteRec(rec.id)}
                             disabled={deleting}

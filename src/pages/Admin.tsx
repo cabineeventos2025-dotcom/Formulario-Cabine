@@ -759,7 +759,11 @@ function PackageManager() {
   const deletePkg = async (id: string) => {
     setDeletingPkg(true);
     try {
-      await supabase.from('pacotes').delete().eq('id', id);
+      const { error } = await supabase.from('pacotes').delete().eq('id', id);
+      if (error) {
+        alert(`Erro ao excluir pacote: ${error.message}`);
+        return;
+      }
       setConfirmDelPkg(null);
       loadPackages();
     } finally {
@@ -986,7 +990,11 @@ function EquipmentManager() {
   const deleteEq = async (id: string) => {
     setDeletingEq(true);
     try {
-      await supabase.from('equipamentos').delete().eq('id', id);
+      const { error } = await supabase.from('equipamentos').delete().eq('id', id);
+      if (error) {
+        alert(`Erro ao excluir equipamento: ${error.message}`);
+        return;
+      }
       setConfirmDelEq(null);
       loadEquipments();
     } finally {
