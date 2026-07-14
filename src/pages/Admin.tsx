@@ -7,8 +7,9 @@ import { LogoArea } from '../components/layout/LogoArea';
 import { ImportModal } from '../components/admin/ImportModal';
 import { FinancialSummary } from '../components/admin/FinancialSummary';
 import { ContractTab } from '../components/admin/ContractTab';
+import { ModeloManager, OpcionaisManager } from '../components/admin/ModeloManager';
 
-type AdminTab = 'formularios' | 'historico' | 'pacotes' | 'equipamentos' | 'recebimentos' | 'financeiro';
+type AdminTab = 'formularios' | 'historico' | 'pacotes' | 'equipamentos' | 'recebimentos' | 'financeiro' | 'contratos' | 'opcionais';
 
 interface FormRecord {
   id: string;
@@ -156,6 +157,8 @@ export function Admin() {
     { id: 'equipamentos', label: 'Equipamentos', icon: '📸' },
     { id: 'recebimentos', label: 'Recebimentos', icon: '💰' },
     { id: 'financeiro', label: 'Financeiro / NF', icon: '📊' },
+    { id: 'contratos', label: 'Modelos de Contrato', icon: '📄' },
+    { id: 'opcionais', label: 'Opcionais', icon: '➕' },
   ];
 
   // Load historico when tab opens
@@ -440,6 +443,12 @@ export function Admin() {
 
         {/* ─── FINANCEIRO / NF ─── */}
         {activeTab === 'financeiro' && <FinancialSummary />}
+
+        {/* ─── MODELOS DE CONTRATO ─── */}
+        {activeTab === 'contratos' && <ModeloManager />}
+
+        {/* ─── OPCIONAIS ─── */}
+        {activeTab === 'opcionais' && <OpcionaisManager />}
 
       </main>
 
