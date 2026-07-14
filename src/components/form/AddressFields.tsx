@@ -76,7 +76,7 @@ export function AddressFields({
       <div className="field-row row-cep">
         <div className="field-wrapper">
           <label className="field-label">
-            CEP <span className="required-mark">*</span>
+            CEP <span style={{ fontSize: '0.78rem', color: 'var(--color-muted)', fontWeight: 400 }}>(opcional)</span>
           </label>
           <div style={{ position: 'relative' }}>
             <input

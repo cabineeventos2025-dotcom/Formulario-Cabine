@@ -211,8 +211,9 @@ export function Formulario() {
     }
 
     if (currentStep === 'endereco') {
-      if (!formData.cep || onlyDigits(formData.cep).length !== 8)
-        newErrors.cep = 'Informe um CEP válido.';
+      // CEP opcional — preenche automaticamente quando digitado
+      if (formData.cep && onlyDigits(formData.cep).length > 0 && onlyDigits(formData.cep).length !== 8)
+        newErrors.cep = 'CEP inválido (8 dígitos).';
       if (!formData.logradouro) newErrors.logradouro = 'Informe o logradouro.';
       if (!formData.numero) newErrors.numero = 'Informe o número.';
       if (!formData.bairro) newErrors.bairro = 'Informe o bairro.';
@@ -236,13 +237,13 @@ export function Formulario() {
     }
 
     if (currentStep === 'evento') {
-      if (!formData.cep_evento || onlyDigits(formData.cep_evento).length !== 8)
-        newErrors.cep_evento = 'Informe o CEP do evento.';
+      // CEP evento opcional — preenche automaticamente quando digitado
+      if (formData.cep_evento && onlyDigits(formData.cep_evento).length > 0 && onlyDigits(formData.cep_evento).length !== 8)
+        newErrors.cep_evento = 'CEP inválido (8 dígitos).';
       if (!formData.logradouro_evento) newErrors.logradouro_evento = 'Informe o logradouro.';
       if (!formData.numero_evento) newErrors.numero_evento = 'Informe o número.';
       if (!formData.bairro_evento) newErrors.bairro_evento = 'Informe o bairro.';
       if (!formData.cidade_evento) newErrors.cidade_evento = 'Informe a cidade.';
-      if (!formData.estado_evento) newErrors.estado_evento = 'Selecione o estado.';
       if (!formData.data_evento) newErrors.data_evento = 'Informe a data do evento.';
       if (formData.tipo_pessoa === 'PJ' && !formData.horario_inicio_evento)
         newErrors.horario_inicio_evento = 'Informe o horário de início.';
