@@ -11,7 +11,7 @@ import { useEquipments } from '../hooks/useEquipments';
 import { saveDraft, loadDraft, clearDraft } from '../lib/storage';
 import { submitForm } from '../services/formService';
 import { sendToGoogleSheets } from '../lib/googleSheets';
-import { maskCPF, maskCNPJ, maskPhone, maskCEP, onlyDigits } from '../lib/masks';
+import { maskCPF, maskCNPJ, maskPhone, maskCEP, onlyDigits, maskDate, isValidDate, isDatePastOrToday, dateToISO } from '../lib/masks';
 import { validateCPF, validateCNPJ } from '../lib/validators';
 import { APP_CONFIG } from '../config/app.config';
 import { PF_STEPS } from '../config/pfQuestions';
@@ -117,10 +117,14 @@ export function Formulario() {
   );
   const { equipments, loading: equipmentsLoading } = useEquipments();
 
-  // ── Load draft on mount ─────────────────────────
+  // ── Load draft on mount ─────────────────
   useEffect(() => {
     const draft = loadDraft();
-    if (draft && draft.formData.submission_id) {
+    // Restore automatically if there's a valid draft (skip modal on re-visit)
+    if (draft && draft.formData.submission_id && (draft.currentStep || 0) > 0) {
+      setFormData({ ...defaultFormData, ...(draft.formData as FormData) });
+      setCurrentStepIndex(draft.currentStep || 0);
+    } else if (draft && draft.formData.submission_id) {
       setShowResumeDraft(true);
     }
   }, []);
@@ -187,9 +191,9 @@ export function Formulario() {
         newErrors.nome_contratante = 'Nome muito curto (mínimo 3 caracteres).';
       if (/^\d+$/.test(formData.nome_contratante))
         newErrors.nome_contratante = 'Nome inválido.';
-      if (!formData.data_nascimento)
-        newErrors.data_nascimento = 'Informe a data de nascimento.';
-      else if (new Date(formData.data_nascimento) > new Date())
+      if (!formData.data_nascimento || !isValidDate(formData.data_nascimento))
+        newErrors.data_nascimento = 'Informe a data no formato DD/MM/AAAA.';
+      else if (!isDatePastOrToday(formData.data_nascimento))
         newErrors.data_nascimento = 'Data não pode ser futura.';
       if (!formData.cpf)
         newErrors.cpf = 'Informe o CPF.';
@@ -452,11 +456,14 @@ export function Formulario() {
                   </label>
                   <input
                     id="field-data_nascimento"
-                    type="date"
+                    type="text"
+                    inputMode="numeric"
                     className={`field-input ${errors.data_nascimento ? 'error' : ''}`}
                     value={formData.data_nascimento}
-                    onChange={(e) => update('data_nascimento', e.target.value)}
-                    max={new Date().toISOString().split('T')[0]}
+                    onChange={(e) => update('data_nascimento', maskDate(e.target.value))}
+                    placeholder="DD/MM/AAAA"
+                    maxLength={10}
+                    autoComplete="bday"
                   />
                   {errors.data_nascimento && <span className="field-error">{errors.data_nascimento}</span>}
                 </div>
@@ -735,11 +742,13 @@ export function Formulario() {
                   </label>
                   <input
                     id="field-data_evento"
-                    type="date"
+                    type="text"
+                    inputMode="numeric"
                     className={`field-input ${errors.data_evento ? 'error' : ''}`}
                     value={formData.data_evento}
-                    onChange={(e) => update('data_evento', e.target.value)}
-                    min={APP_CONFIG.allowPastEventDate ? undefined : new Date().toISOString().split('T')[0]}
+                    onChange={(e) => update('data_evento', maskDate(e.target.value))}
+                    placeholder="DD/MM/AAAA"
+                    maxLength={10}
                   />
                   {errors.data_evento && <span className="field-error">{errors.data_evento}</span>}
                 </div>

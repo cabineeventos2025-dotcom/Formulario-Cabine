@@ -1,6 +1,6 @@
 import { supabase } from '../lib/supabase';
 import type { FormData } from '../types/form.types';
-import { onlyDigits } from '../lib/masks';
+import { onlyDigits, dateToISO } from '../lib/masks';
 
 export interface SubmitResult {
   protocolo: string;
@@ -12,7 +12,8 @@ export async function submitForm(formData: FormData): Promise<SubmitResult> {
     submission_id: formData.submission_id,
     tipo_pessoa: formData.tipo_pessoa,
     nome_contratante: formData.nome_contratante || null,
-    data_nascimento: formData.data_nascimento || null,
+    // Dates: form stores as DD/MM/AAAA, Supabase expects YYYY-MM-DD
+    data_nascimento: formData.data_nascimento ? dateToISO(formData.data_nascimento) : null,
     cpf: formData.cpf ? onlyDigits(formData.cpf) : null,
     rg: formData.rg || null,
     nome_fantasia: formData.nome_fantasia || null,
@@ -38,7 +39,7 @@ export async function submitForm(formData: FormData): Promise<SubmitResult> {
     cidade_evento: formData.cidade_evento || null,
     estado_evento: formData.estado_evento || 'MG',
     referencia_evento: formData.referencia_evento || null,
-    data_evento: formData.data_evento || null,
+    data_evento: formData.data_evento ? dateToISO(formData.data_evento) : null,
     horario_inicio_evento: formData.horario_inicio_evento || null,
     horario_inicio_fotos: formData.horario_inicio_fotos || null,
     forma_pagamento: formData.forma_pagamento || null,
