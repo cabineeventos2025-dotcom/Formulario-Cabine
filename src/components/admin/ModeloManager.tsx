@@ -10,6 +10,8 @@ import {
   type ModeloContrato,
   type Opcional,
 } from '../../services/contractService';
+import { sanitizarHtmlMammoth } from './ContractTab';
+
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -130,11 +132,16 @@ export function ModeloManager() {
 
       let html = result.value;
 
-      // Remove tags desnecessárias que mammoth cria
+      // 1. Remove tags desnecessárias que mammoth cria
       html = html
         .replace(/<img[^>]*>/gi, '') // remove imagens
         .replace(/<a[^>]*>(<br>|<\/br>|\s)*<\/a>/gi, '') // links vazios
         .trim();
+
+      // 2. CRÍTICO: Reagrupa marcadores {{CAMPO}} que o Word fragmentou em
+      //    múltiplos <span>/<strong> durante a conversão DOCX → HTML.
+      //    Sem isso, {{NOME_CON + TRATANTE}} não são reconhecidos.
+      html = sanitizarHtmlMammoth(html);
 
       // Tenta pré-preencher nome a partir do arquivo
       if (!form.nome) {

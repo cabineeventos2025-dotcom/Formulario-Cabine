@@ -128,6 +128,7 @@ export interface DadosContrato {
   data_vencimento?: string;
   valor_hora_adicional?: number;
   valor_hora_adicional_extenso?: string;
+  desconto_pix?: number;            // ex: 10 (representa 10%)
 
   // Publicação
   autoriza_publicacao?: boolean;
@@ -231,9 +232,14 @@ export function preencherTemplate(template: string, dados: Record<string, string
 
 /** Monta o mapa de marcadores a partir dos DadosContrato */
 export function buildMarcadores(d: DadosContrato): Record<string, string> {
-  const autoPublicacao = d.autoriza_publicacao
-    ? '<strong><u>X</u></strong> Autoriza &nbsp;&nbsp;&nbsp; Não autoriza'
-    : 'Autoriza &nbsp;&nbsp;&nbsp; <strong><u>X</u></strong> Não autoriza';
+  // Autorização: apenas texto simples sem "X"
+  const autoPublicacao = d.autoriza_publicacao ? 'AUTORIZA' : 'NÃO AUTORIZA';
+
+  // Forma de pagamento com desconto Pix
+  let formaPgto = d.forma_pagamento || '';
+  if (d.desconto_pix && d.desconto_pix > 0) {
+    formaPgto = `${formaPgto} (com ${d.desconto_pix}% de desconto)`;
+  }
 
   return {
     // Locador
@@ -273,18 +279,22 @@ export function buildMarcadores(d: DadosContrato): Record<string, string> {
     FORMATO_FOTO:                  d.formato_foto || '',
     VALOR_TOTAL:                   d.valor_total ? `R$ ${d.valor_total.toLocaleString('pt-BR',{minimumFractionDigits:2})}` : '',
     VALOR_TOTAL_EXTENSO:           d.valor_total_extenso || (d.valor_total ? valorPorExtenso(d.valor_total).toUpperCase() : ''),
-    FORMA_PAGAMENTO:               d.forma_pagamento || '',
+    FORMA_PAGAMENTO:               formaPgto,
     DATA_VENCIMENTO:               d.data_vencimento || '',
     VALOR_HORA_ADICIONAL:          d.valor_hora_adicional ? `R$ ${d.valor_hora_adicional.toLocaleString('pt-BR',{minimumFractionDigits:2})}` : '',
     VALOR_HORA_ADICIONAL_EXTENSO:  d.valor_hora_adicional_extenso || (d.valor_hora_adicional ? valorPorExtenso(d.valor_hora_adicional) : ''),
 
     // Publicação
     AUTORIZACAO_PUBLICACAO: autoPublicacao,
+    AUTORIZA: d.autoriza_publicacao ? 'AUTORIZA' : 'NÃO AUTORIZA',
 
     // Assinatura
-    CIDADE_ASSINATURA:    d.cidade_assinatura || 'Sarzedo',
-    DATA_CONTRATO:        d.data_contrato || '',
+    CIDADE_ASSINATURA:     d.cidade_assinatura || 'Sarzedo',
+    DATA_CONTRATO:         d.data_contrato || '',
     DATA_CONTRATO_EXTENSO: d.data_contrato || '',
+
+    // Extras
+    DESCONTO_PIX: d.desconto_pix ? `${d.desconto_pix}%` : '10%',
   };
 }
 
