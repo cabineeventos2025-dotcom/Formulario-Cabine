@@ -7,6 +7,8 @@ import {
   createModelo,
   updateModelo,
   detectarMarcadores,
+  seedModelosPadrao,
+  seedPacotesPadrao,
   type ModeloContrato,
   type Opcional,
 } from '../../services/contractService';
@@ -68,6 +70,10 @@ export function ModeloManager() {
   const [uploadStep, setUploadStep] = useState<'idle' | 'converting' | 'done'>('idle');
   const [uploadError, setUploadError] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Seed state
+  const [seeding, setSeeding] = useState(false);
+  const [seedMsg, setSeedMsg] = useState('');
 
   // Form state
   const [form, setForm] = useState({
@@ -259,11 +265,51 @@ export function ModeloManager() {
           </div>
         </div>
         {!showForm && (
-          <button className="btn btn-primary" onClick={() => setShowForm(true)}>
-            + Novo modelo
-          </button>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <button className="btn btn-primary" onClick={() => setShowForm(true)}>
+              + Novo modelo
+            </button>
+            <button
+              className="btn btn-ghost"
+              disabled={seeding}
+              title="Insere/atualiza todos os modelos padrão (Cabine, Totem, Paparazzi) no banco"
+              onClick={async () => {
+                setSeeding(true);
+                setSeedMsg('');
+                try {
+                  const res = await seedModelosPadrao();
+                  const pkgRes = await seedPacotesPadrao();
+                  const total = res.ok + pkgRes.ok;
+                  const errs = [...res.erros, ...pkgRes.erros];
+                  if (errs.length > 0) {
+                    setSeedMsg(`⚠️ ${total} item(s) atualizados. Erros: ${errs.join('; ')}`);
+                  } else {
+                    setSeedMsg(`✅ ${total} item(s) atualizados com sucesso!`);
+                  }
+                  await load();
+                } catch (e: any) {
+                  setSeedMsg(`❌ Erro: ${e.message}`);
+                } finally {
+                  setSeeding(false);
+                }
+              }}
+            >
+              {seeding ? '...' : '🔄 Inicializar Padrões'}
+            </button>
+          </div>
         )}
       </div>
+
+      {seedMsg && (
+        <div style={{
+          padding: '10px 16px', borderRadius: 8, marginBottom: 16,
+          background: seedMsg.startsWith('✅') ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
+          color: seedMsg.startsWith('✅') ? '#22c55e' : '#ef4444',
+          fontSize: '0.85rem', fontWeight: 600,
+        }}>
+          {seedMsg}
+        </div>
+      )}
 
       {/* ─── Formulário de upload ─────────────────────────────────────────── */}
       {showForm && (

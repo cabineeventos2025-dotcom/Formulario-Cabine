@@ -2,6 +2,15 @@
 // Serviço de Contratos — Cabine Só Alegria
 // ================================================================
 import { supabase } from '../lib/supabase';
+import {
+  TEMPLATE_CABINE_FOTOGRARICA,
+  TEMPLATE_CABINE_PJ,
+  TEMPLATE_TOTEM_PF,
+  TEMPLATE_TOTEM_PJ,
+  TEMPLATE_TOTEM_RETRO_PF,
+  TEMPLATE_PAPARAZZI_PF,
+  TEMPLATE_PAPARAZZI_PJ,
+} from '../templates/contratoTemplates';
 
 // ─── Tipos ──────────────────────────────────────────────────────
 
@@ -275,8 +284,9 @@ export function buildMarcadores(d: DadosContrato): Record<string, string> {
     // Serviço
     EQUIPAMENTO:                   d.equipamento || '',
     QUANTIDADE_HORAS:              d.quantidade_horas || '',
-    PACOTE:                        d.pacote || '',
-    FORMATO_FOTO:                  d.formato_foto || '',
+    // PACOTE: mostra o formato da foto (ex: "5 X 15") — derivado do nome do pacote
+    PACOTE:                        d.formato_foto || d.pacote || '',
+    FORMATO_FOTO:                  d.formato_foto || d.pacote || '',
     VALOR_TOTAL:                   d.valor_total ? `R$ ${d.valor_total.toLocaleString('pt-BR',{minimumFractionDigits:2})}` : '',
     VALOR_TOTAL_EXTENSO:           d.valor_total_extenso || (d.valor_total ? valorPorExtenso(d.valor_total).toUpperCase() : ''),
     FORMA_PAGAMENTO:               formaPgto,
@@ -446,3 +456,148 @@ export async function getProximaVersao(formularioId: string): Promise<number> {
   if (!data || data.length === 0) return 1;
   return (data[0].numero_versao || 0) + 1;
 }
+
+// ─── Seed: Insere modelos padrão no banco ────────────────────────────────────
+
+export async function seedModelosPadrao(): Promise<{ ok: number; erros: string[] }> {
+  // Templates já importados estaticamente no topo do arquivo
+  const modelos = [
+    {
+      nome: 'Cabine Fotográfica — PF',
+      descricao: 'Contrato padrão Cabine para Pessoa Física',
+      tipo_pessoa: 'PF',
+      equipamento_nome: 'cabine',
+      conteudo_html: TEMPLATE_CABINE_FOTOGRARICA,
+      ativo: true,
+      modelo_padrao: true,
+      versao: 1,
+    },
+    {
+      nome: 'Cabine Fotográfica — PJ',
+      descricao: 'Contrato padrão Cabine para Pessoa Jurídica',
+      tipo_pessoa: 'PJ',
+      equipamento_nome: 'cabine',
+      conteudo_html: TEMPLATE_CABINE_PJ,
+      ativo: true,
+      modelo_padrao: true,
+      versao: 1,
+    },
+    {
+      nome: 'Totem Personalizado — PF',
+      descricao: 'Contrato padrão Totem Personalizado para Pessoa Física',
+      tipo_pessoa: 'PF',
+      equipamento_nome: 'totem',
+      conteudo_html: TEMPLATE_TOTEM_PF,
+      ativo: true,
+      modelo_padrao: false,
+      versao: 1,
+    },
+    {
+      nome: 'Totem Personalizado — PJ',
+      descricao: 'Contrato padrão Totem Personalizado para Pessoa Jurídica',
+      tipo_pessoa: 'PJ',
+      equipamento_nome: 'totem',
+      conteudo_html: TEMPLATE_TOTEM_PJ,
+      ativo: true,
+      modelo_padrao: false,
+      versao: 1,
+    },
+    {
+      nome: 'Totem Retrô — PF',
+      descricao: 'Contrato padrão Totem Retrô para Pessoa Física',
+      tipo_pessoa: 'PF',
+      equipamento_nome: 'totem_retro',
+      conteudo_html: TEMPLATE_TOTEM_RETRO_PF,
+      ativo: true,
+      modelo_padrao: false,
+      versao: 1,
+    },
+    {
+      nome: 'Paparazzi — PF',
+      descricao: 'Contrato padrão Cabine Paparazzi para Pessoa Física',
+      tipo_pessoa: 'PF',
+      equipamento_nome: 'paparazzi',
+      conteudo_html: TEMPLATE_PAPARAZZI_PF,
+      ativo: true,
+      modelo_padrao: false,
+      versao: 1,
+    },
+    {
+      nome: 'Paparazzi — PJ',
+      descricao: 'Contrato padrão Cabine Paparazzi para Pessoa Jurídica',
+      tipo_pessoa: 'PJ',
+      equipamento_nome: 'paparazzi',
+      conteudo_html: TEMPLATE_PAPARAZZI_PJ,
+      ativo: true,
+      modelo_padrao: false,
+      versao: 1,
+    },
+  ];
+
+  let ok = 0;
+  const erros: string[] = [];
+
+  for (const modelo of modelos) {
+    // Verifica se já existe pelo nome
+    const { data: exists } = await supabase
+      .from('modelos_contrato')
+      .select('id')
+      .eq('nome', modelo.nome)
+      .maybeSingle();
+
+    if (exists) {
+      // Atualiza se já existe
+      const { error } = await supabase
+        .from('modelos_contrato')
+        .update({ conteudo_html: modelo.conteudo_html, descricao: modelo.descricao, ativo: modelo.ativo })
+        .eq('id', exists.id);
+      if (error) erros.push(`${modelo.nome}: ${error.message}`);
+      else ok++;
+    } else {
+      const { error } = await supabase.from('modelos_contrato').insert(modelo);
+      if (error) erros.push(`${modelo.nome}: ${error.message}`);
+      else ok++;
+    }
+  }
+
+  return { ok, erros };
+}
+
+// ─── Seed: Atualiza pacotes padrão ───────────────────────────────────────────
+
+export async function seedPacotesPadrao(): Promise<{ ok: number; erros: string[] }> {
+  const pacotes = [
+    { ordem: 1, nome: 'Pacote 1', tamanho_foto: '10x15 cm', descricao: 'Tamanho 10x15 cm' },
+    { ordem: 2, nome: 'Pacote 2', tamanho_foto: '5x15 cm',  descricao: 'Tamanho 5x15 cm' },
+    { ordem: 3, nome: 'Pacote 3', tamanho_foto: '7,5x10 cm',descricao: 'Tamanho 7,5x10 cm' },
+  ];
+
+  let ok = 0;
+  const erros: string[] = [];
+
+  for (const p of pacotes) {
+    const { data: exists } = await supabase
+      .from('pacotes')
+      .select('id')
+      .eq('ordem', p.ordem)
+      .maybeSingle();
+
+    if (exists) {
+      const { error } = await supabase
+        .from('pacotes')
+        .update({ nome: p.nome, tamanho_foto: p.tamanho_foto, descricao: p.descricao })
+        .eq('id', exists.id);
+      if (error) erros.push(`Pacote ${p.ordem}: ${error.message}`);
+      else ok++;
+    } else {
+      const { error } = await supabase.from('pacotes').insert({
+        ...p, permite_pf: true, permite_pj: true, ativo: true,
+      });
+      if (error) erros.push(`Pacote ${p.ordem}: ${error.message}`);
+      else ok++;
+    }
+  }
+
+  return { ok, erros };
+}
+
