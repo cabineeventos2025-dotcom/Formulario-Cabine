@@ -61,7 +61,7 @@ export function FinancialSummary() {
           .order('formulario_evento_id', { ascending: false }),
       ]);
       setSummary(sumData);
-      setRecebimentos((recData.data || []) as RecebimentoRecord[]);
+      setRecebimentos((recData.data || []) as unknown as RecebimentoRecord[]);
     } finally {
       setLoading(false);
     }

@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { parseXlsxBuffer, type ParsedHistoricalRow, type ParseResult } from '../../lib/xlsxParser';
+import { parseXlsxBuffer, type ParseResult } from '../../lib/xlsxParser';
 import { importHistoricalRows, type ImportResult } from '../../services/importService';
 import { formatBRL } from '../../utils/formatters';
 
