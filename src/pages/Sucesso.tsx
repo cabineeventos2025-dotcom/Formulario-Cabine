@@ -20,11 +20,20 @@ export function Sucesso() {
   const firstName = nome.split(' ')[0];
   const dataEvento = state?.dataEvento || '';
 
-  const formattedDate = dataEvento
-    ? new Date(dataEvento + 'T12:00:00').toLocaleDateString('pt-BR', {
-        day: '2-digit', month: 'long', year: 'numeric',
-      })
-    : '';
+  // dataEvento comes as DD/MM/AAAA from form state
+  const formattedDate = (() => {
+    if (!dataEvento) return '';
+    // Already in DD/MM/AAAA format — just display as-is, but also try to show month name
+    const m = dataEvento.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (m) {
+      const dt = new Date(`${m[3]}-${m[2]}-${m[1]}T12:00:00`);
+      if (!isNaN(dt.getTime())) {
+        return dt.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' });
+      }
+    }
+    // Fallback: just show as typed
+    return dataEvento;
+  })();
 
   const whatsappMsg = encodeURIComponent(
     `Olá! Acabei de enviar as informações do meu evento. Meu protocolo é ${protocolo}.`
@@ -43,7 +52,7 @@ export function Sucesso() {
           </h1>
           <p className="step-subtitle" style={{ textAlign: 'center' }}>
             Suas informações foram enviadas com sucesso.
-            Nossa equipe já recebeu tudo e entrará em contato em breve.
+            Nossa equipe já recebeu tudo, vamos reservar a sua data e enviaremos o contrato em breve.
           </p>
 
           <div style={{ margin: '20px 0' }}>
