@@ -712,6 +712,24 @@ function PackageManager() {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<any | null>(null);
   const [form, setForm] = useState({ nome: '', descricao: '', tamanho_foto: '', imagem_url: '', permite_pf: true, permite_pj: true, ativo: true, ordem: 1 });
+  const [imgPreviewError, setImgPreviewError] = useState(false);
+
+  // Auto-fix ImgBB page URL -> direct image URL
+  const normalizeImageUrl = (raw: string): string => {
+    // ibb.co/XXXXX -> i.ibb.co (needs page scrape, so we just warn)
+    // ibb.co/XXXXX/filename.jpg -> i.ibb.co/XXXXX/filename.jpg  
+    const match = raw.match(/^https?:\/\/(?:www\.)?ibb\.co\/([a-zA-Z0-9]+)(\/[\w.-]+)?$/);
+    if (match) {
+      // If it's a page link (no filename), we can't auto-convert — just return raw
+      return raw;
+    }
+    return raw;
+  };
+
+  const handleImageUrl = (raw: string) => {
+    setImgPreviewError(false);
+    setForm(f => ({ ...f, imagem_url: raw }));
+  };
 
   useEffect(() => { loadPackages(); }, []);
 
@@ -771,8 +789,43 @@ function PackageManager() {
               <textarea className="field-input" rows={2} value={form.descricao} onChange={e => setForm(f => ({ ...f, descricao: e.target.value }))} />
             </div>
             <div className="field-wrapper">
-              <label className="field-label">URL da imagem</label>
-              <input className="field-input" value={form.imagem_url} onChange={e => setForm(f => ({ ...f, imagem_url: e.target.value }))} placeholder="https://..." />
+              <label className="field-label">URL da imagem (link direto)</label>
+              <input
+                className="field-input"
+                value={form.imagem_url}
+                onChange={e => handleImageUrl(e.target.value)}
+                placeholder="https://i.ibb.co/... ou outro link direto"
+              />
+              {/* Live preview */}
+              {form.imagem_url && (
+                <div style={{ marginTop: 10 }}>
+                  {imgPreviewError ? (
+                    <div style={{
+                      padding: '10px 14px', background: 'rgba(239,68,68,0.08)',
+                      border: '1px solid rgba(239,68,68,0.3)', borderRadius: 8,
+                      fontSize: '0.82rem', color: '#ef4444',
+                    }}>
+                      ⚠️ Imagem não carregou. Verifique se o link é um <strong>link direto</strong> da imagem
+                      (deve terminar em .jpg, .png, .webp etc.).<br />
+                      No ImgBB, use o link <strong>“Direct link”</strong> (começa com <code>i.ibb.co</code>), não a página <code>ibb.co</code>.
+                    </div>
+                  ) : (
+                    <img
+                      src={form.imagem_url}
+                      alt="Preview"
+                      onError={() => setImgPreviewError(true)}
+                      onLoad={() => setImgPreviewError(false)}
+                      style={{
+                        maxHeight: 140, maxWidth: '100%', borderRadius: 8,
+                        border: '1px solid var(--color-surface-border)', objectFit: 'cover',
+                      }}
+                    />
+                  )}
+                </div>
+              )}
+              <span className="field-helper" style={{ marginTop: 6 }}>
+                Use o “Direct link” do ImgBB (começa com <strong>i.ibb.co</strong>) ou qualquer URL terminada em .jpg/.png/.webp
+              </span>
             </div>
             <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.875rem', cursor: 'pointer' }}>
@@ -807,12 +860,24 @@ function PackageManager() {
           <table className="admin-table">
             <thead>
               <tr>
-                <th>Ordem</th><th>Nome</th><th>Tamanho</th><th>PF</th><th>PJ</th><th>Status</th><th>Ações</th>
+                <th>Img</th><th>Ordem</th><th>Nome</th><th>Tamanho</th><th>PF</th><th>PJ</th><th>Status</th><th>Ações</th>
               </tr>
             </thead>
             <tbody>
               {packages.map(p => (
                 <tr key={p.id}>
+                  <td style={{ width: 52 }}>
+                    {p.imagem_url ? (
+                      <img
+                        src={p.imagem_url}
+                        alt={p.nome}
+                        style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--color-surface-border)' }}
+                        onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                      />
+                    ) : (
+                      <div style={{ width: 44, height: 44, background: 'var(--color-surface-hover)', borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.2rem' }}>📦</div>
+                    )}
+                  </td>
                   <td>{p.ordem}</td>
                   <td>{p.nome}</td>
                   <td>{p.tamanho_foto}</td>
@@ -820,7 +885,7 @@ function PackageManager() {
                   <td>{p.permite_pj ? '✅' : '—'}</td>
                   <td><span className={`badge ${p.ativo ? 'badge-ok' : 'badge-warn'}`}>{p.ativo ? 'Ativo' : 'Inativo'}</span></td>
                   <td>
-                    <button className="btn btn-ghost" onClick={() => { setEditing(p); setForm({ nome: p.nome, descricao: p.descricao || '', tamanho_foto: p.tamanho_foto || '', imagem_url: p.imagem_url || '', permite_pf: p.permite_pf, permite_pj: p.permite_pj, ativo: p.ativo, ordem: p.ordem }); }}>
+                    <button className="btn btn-ghost" onClick={() => { setImgPreviewError(false); setEditing(p); setForm({ nome: p.nome, descricao: p.descricao || '', tamanho_foto: p.tamanho_foto || '', imagem_url: p.imagem_url || '', permite_pf: p.permite_pf, permite_pj: p.permite_pj, ativo: p.ativo, ordem: p.ordem }); }}>
                       ✏️
                     </button>
                     <button className="btn btn-ghost" onClick={() => toggleAtivo(p.id, p.ativo)}>
