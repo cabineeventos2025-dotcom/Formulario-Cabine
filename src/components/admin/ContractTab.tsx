@@ -28,6 +28,10 @@ import {
   TEMPLATE_CABINE_PJ,
   MARCADORES_OBRIGATORIOS_PF,
   MARCADORES_OBRIGATORIOS_PJ,
+  detectarTipoEquipamento,
+  getTemplatePadrao,
+  formatarHoras,
+  formatoFromPacote,
 } from '../../templates/contratoTemplates';
 
 // ─── Props ───────────────────────────────────────────────────────────────────
@@ -281,10 +285,13 @@ export function ContractTab({ formulario, formularioId }: ContractTabProps) {
       endereco_evento:      montarEnderecoEvento(),
 
       // Serviço — puxado do formulário
+      // Equipamento: usa nome do snapshot
       equipamento:      (fe.equipamento_nome_snapshot as string) || (fe.equipamento as string) || '',
-      quantidade_horas: (fe.quantidade_horas as string) || (fe.horas as string) || '',
+      // Horas: sempre com "HORAS" no final
+      quantidade_horas: formatarHoras((fe.quantidade_horas as string) || (fe.horas as string) || ''),
       pacote:           (fe.pacote_nome_snapshot as string) || (fe.pacote as string) || (fe.nome_pacote as string) || '',
-      formato_foto:     (fe.formato_foto as string) || (fe.tamanho_foto as string) || '',
+      // Formato derivado do pacote automaticamente (sem campo separado)
+      formato_foto:     formatoFromPacote((fe.pacote_nome_snapshot as string) || (fe.pacote as string) || ''),
       valor_total:      Number(fe.valor_total) || undefined,
       forma_pagamento:  (fe.forma_pagamento as string) || 'Pix',
 
@@ -321,8 +328,10 @@ export function ContractTab({ formulario, formularioId }: ContractTabProps) {
   // ─── Renderiza HTML final do contrato ─────────────────────────────────────
 
   const renderContratoHtml = (dados: DadosContrato): string => {
+    // Detecta tipo de equipamento para escolher o template certo
+    const tipoEquip = detectarTipoEquipamento(dados.equipamento || '');
     let template = modeloSelecionado?.conteudo_html
-      || (tipoPessoa === 'PJ' ? TEMPLATE_CABINE_PJ : TEMPLATE_CABINE_FOTOGRARICA);
+      || getTemplatePadrao(tipoEquip, tipoPessoa);
 
     // Limpa fragmentação de marcadores gerada pelo mammoth/Word
     template = sanitizarHtmlMammoth(template);
@@ -438,7 +447,7 @@ export function ContractTab({ formulario, formularioId }: ContractTabProps) {
     }
   };
 
-  // ─── CSS de impressão — igual ao Anexo 2 (margens compactas, texto justificado) ──
+  // ─── CSS de impressão A4 — texto até a borda, máx 3/4 páginas ────────────
 
   const buildPrintHtml = (body: string, titulo: string) => `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -452,65 +461,40 @@ export function ContractTab({ formulario, formularioId }: ContractTabProps) {
     font-size: 12pt;
     color: #000;
     background: #fff;
-    line-height: 1.4;
-  }
-  .contrato-page {
-    width: 100%;
-    padding: 2cm 2cm;
+    line-height: 1.45;
   }
   .contrato-titulo {
     text-align: center;
     font-weight: bold;
-    font-size: 14pt;
+    font-size: 13pt;
     text-transform: uppercase;
-    margin-bottom: 18pt;
-    letter-spacing: 0.5px;
+    margin-bottom: 14pt;
     text-decoration: underline;
   }
-  .contrato-corpo p {
+  p {
     text-align: justify;
-    margin-bottom: 8pt;
+    margin-bottom: 7pt;
     line-height: 1.45;
-    text-indent: 0;
+    orphans: 2;
+    widows: 2;
   }
-  .contrato-corpo p + p { margin-top: 0; }
-  .contrato-corpo .alinea { padding-left: 16pt; }
-  /* suporte a parágrafos vindos do mammoth (sem classe) */
-  .contrato-corpo > p,
-  .contrato-corpo > div > p { text-align: justify; margin-bottom: 8pt; }
-  /* Headings do mammoth */
-  h1,h2,h3 { font-size: 12pt; font-weight: bold; margin-bottom: 6pt; }
-  .contrato-local-data {
-    margin-top: 24pt;
-    margin-bottom: 32pt;
-    text-align: center;
+  h1,h2,h3 { font-size: 12pt; font-weight: bold; margin-bottom: 5pt; }
+  @page {
+    size: A4 portrait;
+    margin: 1.5cm 1.8cm;
   }
-  .contrato-assinaturas {
-    display: flex;
-    justify-content: space-between;
-    margin-top: 24pt;
-    gap: 30pt;
-  }
-  .assinatura-bloco { flex: 1; text-align: center; }
-  .assinatura-linha { border-top: 1px solid #000; margin-bottom: 5pt; }
-  .assinatura-nome   { font-weight: bold; font-size: 10pt; }
-  .assinatura-detalhe{ font-size: 9pt; }
   @media print {
-    body { -webkit-print-color-adjust: exact; }
-    .contrato-page { padding: 1.5cm 2cm; }
-    @page {
-      margin: 1.5cm 2cm;
-      size: A4 portrait;
-    }
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    p { margin-bottom: 6pt; }
   }
 </style>
 </head>
 <body>
-<div class="contrato-page">
 ${body}
-</div>
 </body>
 </html>`;
+
+
 
   // ─── Preview do contrato no wizard ────────────────────────────────────────
 
@@ -696,6 +680,7 @@ ${body}
               [tipoPessoa === 'PF' ? 'CPF' : 'CNPJ', tipoPessoa === 'PF' ? dados.cpf : dados.cnpj_pj],
               ['E-mail', dados.email],
               ['Telefone', dados.telefone],
+              ['Endereço do contratante', dados.endereco_contratante],
               ['Nome do evento', dados.nome_evento],
               ['Data do evento', dados.data_evento ? formatDateBR(dados.data_evento) : ''],
               ['Horário do evento', dados.horario_evento],
@@ -703,10 +688,9 @@ ${body}
               ['Endereço do evento', dados.endereco_evento],
               ['Equipamento', dados.equipamento],
               ['Pacote', dados.pacote],
-              ['Formato da foto', dados.formato_foto],
               ['Quantidade de horas', dados.quantidade_horas],
               ['Forma de pagamento', dados.forma_pagamento],
-              ['Autoriza publicação', dados.autoriza_publicacao ? '✅ Autoriza' : '❌ Não autoriza'],
+              ['Autorização de fotos', dados.autoriza_publicacao ? '✅ Autoriza' : '❌ Não autoriza'],
             ].map(([label, val]) => val ? (
               <div key={label} style={{ padding: '6px 10px', background: 'var(--color-surface-hover)', borderRadius: 6 }}>
                 <div style={{ color: 'var(--color-muted)', fontSize: '0.7rem', fontWeight: 600 }}>{label}</div>
@@ -739,22 +723,11 @@ ${body}
             </div>
             {field('Endereço do contratante', 'endereco_contratante')}
           </div>
-          <div style={{ marginBottom: 12 }}>
-            <div style={{ fontSize: '0.75rem', color: 'var(--color-muted)', marginBottom: 6, fontWeight: 600 }}>
-              Autorização de publicação de fotos
-            </div>
-            <div style={{ display: 'flex', gap: 16 }}>
-              {[true, false].map(v => (
-                <label key={String(v)} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '0.875rem' }}>
-                  <input
-                    type="radio"
-                    checked={(dadosExtras.autoriza_publicacao ?? dados.autoriza_publicacao) === v}
-                    onChange={() => setDadosExtras(prev => ({ ...prev, autoriza_publicacao: v }))}
-                  />
-                  {v ? '✅ Autoriza' : '❌ Não autoriza'}
-                </label>
-              ))}
-            </div>
+          <div style={{ marginBottom: 12, padding: '10px 14px', background: 'var(--color-surface-hover)', borderRadius: 8, fontSize: '0.85rem' }}>
+            <span style={{ color: 'var(--color-muted)', fontWeight: 600 }}>Autorização de fotos (respondida pelo cliente):</span>{' '}
+            <strong style={{ color: dados.autoriza_publicacao ? '#22c55e' : '#ef4444' }}>
+              {dados.autoriza_publicacao ? '✅ AUTORIZA' : '❌ NÃO AUTORIZA'}
+            </strong>
           </div>
           <div style={fieldRow}>
             {field('Data do contrato (por extenso)', 'data_contrato', 'text')}

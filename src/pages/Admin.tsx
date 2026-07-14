@@ -653,12 +653,19 @@ function FormDetail({
             <Row label="CPF" value={formatCPFDisplay(fa.cpf)} />
             <Row label="RG" value={fa.rg} />
             <Row label="Nascimento" value={formatDate(fa.data_nascimento)} />
+            <Row label="Endereço" value={[
+              fa.logradouro, fa.numero, fa.complemento, fa.bairro, fa.cidade, fa.estado, fa.cep
+            ].filter(Boolean).join(', ')} />
           </>
         ) : (
           <>
             <Row label="Nome Fantasia" value={form.nome_fantasia} />
             <Row label="CNPJ" value={formatCNPJDisplay(fa.cnpj)} />
             <Row label="Responsável" value={form.nome_responsavel} />
+            <Row label="Endereço empresa" value={[
+              fa.empresa_logradouro || fa.logradouro_empresa, fa.empresa_numero, fa.empresa_complemento,
+              fa.empresa_bairro, fa.empresa_cidade, fa.empresa_estado
+            ].filter(Boolean).join(', ')} />
           </>
         )}
         <Field label="E-mail" field="email" type="email" />
@@ -673,17 +680,19 @@ function FormDetail({
         <Field label="Data" field="data_evento" type="date" />
         <Field label="Início evento" field="horario_inicio_evento" type="time" />
         <Field label="Início fotos" field="horario_inicio_fotos" type="time" />
-        <Field label="Cidade" field="cidade_evento" />
-        <Field label="Logradouro" field="logradouro_evento" />
-        <div style={{ display: 'flex', gap: 8 }}>
-          <div style={{ flex: 1 }}><Field label="Número" field="numero_evento" /></div>
-          <div style={{ flex: 2 }}><Field label="Complemento" field="complemento_evento" /></div>
-        </div>
-        <Field label="Bairro" field="bairro_evento" />
+        <Row label="Endereço do evento" value={[
+          fa.logradouro_evento, fa.numero_evento, fa.complemento_evento,
+          fa.bairro_evento, fa.cidade_evento, fa.estado_evento, fa.cep_evento
+        ].filter(Boolean).join(', ')} />
         <Field label="Forma de pagamento" field="forma_pagamento" />
         <Field label="Horas" field="quantidade_horas" />
         <Field label="Pacote" field="pacote_nome_snapshot" />
-        <Field label="Equipamento" field="equipamento_nome_snapshot" />
+        <div className="review-field">
+          <span className="review-field-label">Equipamento</span>
+          <span className="review-field-value">
+            {fa.equipamento_nome_snapshot || <span style={{color:'#f59e0b'}}>⚠ Não preenchido</span>}
+          </span>
+        </div>
         <Row label="Publicação fotos" value={
           form.autoriza_publicacao_fotos === true ? 'Autorizado' :
           form.autoriza_publicacao_fotos === false ? 'Não autorizado' : '—'
