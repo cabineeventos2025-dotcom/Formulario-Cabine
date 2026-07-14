@@ -6,6 +6,7 @@ import { formatDate, formatDateTime, formatPhone, formatCPFDisplay, formatCNPJDi
 import { LogoArea } from '../components/layout/LogoArea';
 import { ImportModal } from '../components/admin/ImportModal';
 import { FinancialSummary } from '../components/admin/FinancialSummary';
+import { ContractTab } from '../components/admin/ContractTab';
 
 type AdminTab = 'formularios' | 'historico' | 'pacotes' | 'equipamentos' | 'recebimentos' | 'financeiro';
 
@@ -567,55 +568,32 @@ function FormDetail({
     );
   };
 
+  const [detailTab, setDetailTab] = useState<'dados' | 'contrato'>('dados');
+
   return (
     <div>
       {/* Header bar */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
         <button className="btn btn-ghost" onClick={onBack}>← Voltar à lista</button>
         <div style={{ flex: 1 }} />
-        {!editing ? (
+        {detailTab === 'dados' && !editing ? (
           <>
-            <button
-              className="btn btn-secondary"
-              onClick={() => setEditing(true)}
-            >
-              ✏️ Editar
-            </button>
-            <button
-              className="btn btn-ghost"
-              style={{ color: '#ef4444', borderColor: '#ef4444' }}
-              onClick={() => setConfirmDel(true)}
-            >
-              🗑️ Excluir
-            </button>
+            <button className="btn btn-secondary" onClick={() => setEditing(true)}>✏️ Editar</button>
+            <button className="btn btn-ghost" style={{ color: '#ef4444', borderColor: '#ef4444' }} onClick={() => setConfirmDel(true)}>🗑️ Excluir</button>
           </>
-        ) : (
+        ) : detailTab === 'dados' && editing ? (
           <>
-            <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
-              {saving ? 'Salvando...' : '✓ Salvar alterações'}
-            </button>
+            <button className="btn btn-primary" onClick={handleSave} disabled={saving}>{saving ? 'Salvando...' : '✓ Salvar alterações'}</button>
             <button className="btn btn-ghost" onClick={() => setEditing(false)}>Cancelar</button>
           </>
-        )}
+        ) : null}
       </div>
 
       {/* Confirm delete inline */}
       {confirmDel && (
-        <div style={{
-          background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)',
-          borderRadius: 10, padding: '16px 20px', marginBottom: 16,
-          display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap',
-        }}>
-          <span style={{ color: '#ef4444', fontWeight: 600, flex: 1 }}>
-            Tem certeza? Esta ação é permanente e removerá também os dados financeiros.
-          </span>
-          <button
-            className="btn btn-primary"
-            style={{ background: '#ef4444', borderColor: '#ef4444' }}
-            onClick={() => onDelete(form.id)}
-          >
-            ✕ Excluir
-          </button>
+        <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 10, padding: '16px 20px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+          <span style={{ color: '#ef4444', fontWeight: 600, flex: 1 }}>Tem certeza? Esta ação é permanente e removerá também os dados financeiros.</span>
+          <button className="btn btn-primary" style={{ background: '#ef4444', borderColor: '#ef4444' }} onClick={() => onDelete(form.id)}>✕ Excluir</button>
           <button className="btn btn-ghost" onClick={() => setConfirmDel(false)}>Cancelar</button>
         </div>
       )}
@@ -628,7 +606,34 @@ function FormDetail({
         </span>
       </div>
 
-      {/* Dados pessoais / empresa (read-only) */}
+      {/* Tab navigation */}
+      <div style={{ display: 'flex', gap: 4, marginBottom: 20, borderBottom: '1px solid var(--color-surface-border)', paddingBottom: 0 }}>
+        {([['dados','📋 Dados'],['contrato','📄 Contrato']] as [string,string][]).map(([id, label]) => (
+          <button
+            key={id}
+            onClick={() => setDetailTab(id as 'dados'|'contrato')}
+            style={{
+              padding: '10px 20px',
+              background: 'transparent',
+              border: 'none',
+              borderBottom: detailTab === id ? '2px solid var(--color-secondary)' : '2px solid transparent',
+              color: detailTab === id ? 'var(--color-secondary)' : 'var(--color-muted)',
+              fontWeight: detailTab === id ? 700 : 400,
+              cursor: 'pointer',
+              fontSize: '0.9rem',
+              transition: 'all 0.15s',
+            }}
+          >{label}</button>
+        ))}
+      </div>
+
+      {/* Tab: Contrato */}
+      {detailTab === 'contrato' && (
+        <ContractTab formulario={form as unknown as Record<string, unknown>} formularioId={form.id} />
+      )}
+
+      {/* Tab: Dados */}
+      {detailTab === 'dados' && (<>
       <div className="admin-card">
         <div className="review-section-title" style={{ marginBottom: 10 }}>
           {isPF ? 'Dados pessoais' : 'Dados da empresa'}
@@ -694,12 +699,12 @@ function FormDetail({
         )}
       </div>
 
-      {/* Metadata */}
-      <div className="admin-card">
-        <div className="review-section-title" style={{ marginBottom: 10 }}>Metadata</div>
-        <Row label="Protocolo" value={form.protocolo} />
-        <Row label="Enviado em" value={formatDateTime(form.created_at)} />
-      </div>
+        <div className="admin-card">
+          <div className="review-section-title" style={{ marginBottom: 10 }}>Metadata</div>
+          <Row label="Protocolo" value={form.protocolo} />
+          <Row label="Enviado em" value={formatDateTime(form.created_at)} />
+        </div>
+      </>)}
     </div>
   );
 }
