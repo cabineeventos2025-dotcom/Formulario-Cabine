@@ -125,6 +125,11 @@ function parseBRL(raw: unknown): number {
 /**
  * Parse date from various formats to ISO yyyy-mm-dd string.
  * Handles: Excel serial numbers, dd/mm/yyyy, dd/mm/yy, yyyy-mm-dd
+ *
+ * ⚠️  IMPORTANT: We NEVER call new Date("YYYY-MM-DD") here because
+ * JavaScript treats that as UTC midnight, which becomes the PREVIOUS day
+ * when displayed in Brazil (UTC-3). All date-only values are assembled
+ * purely as strings to avoid any timezone shift.
  */
 function parseDate(raw: unknown): string | null {
   if (raw === null || raw === undefined || raw === '') return null;
@@ -132,40 +137,55 @@ function parseDate(raw: unknown): string | null {
   // Excel serial date number (e.g. 46032 = 2026-01-10)
   if (typeof raw === 'number') {
     if (raw < 1) return null; // time fraction only, no date
-    // Excel bug: wrongly treats 1900 as leap year, so serial >= 60 needs -1
+    // Excel has a leap-year bug: incorrectly treats 1900 as leap year,
+    // so any serial >= 60 must subtract 1 to get the correct day.
     const adjusted = raw >= 60 ? raw - 1 : raw;
-    const date = new Date((adjusted - 25569) * 86400 * 1000);
-    if (isNaN(date.getTime())) return null;
-    return date.toISOString().slice(0, 10);
+    // Convert to UTC ms. We use UTC explicitly so toISOString is stable.
+    const utcMs = (adjusted - 25569) * 86400 * 1000;
+    const d = new Date(utcMs);
+    if (isNaN(d.getTime())) return null;
+    // Build YYYY-MM-DD from UTC components to avoid local-timezone shift
+    const yyyy = d.getUTCFullYear();
+    const mm   = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const dd   = String(d.getUTCDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
   }
 
   const s = String(raw).trim();
   if (!s) return null;
 
-  // dd/mm/yyyy or dd/mm/yy
+  // dd/mm/yyyy or dd/mm/yy  (Brazilian format from Google Forms)
   const brMatch = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
   if (brMatch) {
     const [, d, m, y] = brMatch;
     const year = y.length === 2 ? (parseInt(y) > 30 ? `19${y}` : `20${y}`) : y;
-    const iso = `${year}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
-    const dt = new Date(iso);
-    return isNaN(dt.getTime()) ? null : iso;
+    const dayN  = parseInt(d, 10);
+    const monN  = parseInt(m, 10);
+    const yearN = parseInt(year, 10);
+    // Basic sanity check without creating a Date object
+    if (monN < 1 || monN > 12 || dayN < 1 || dayN > 31 || yearN < 1900) return null;
+    return `${year}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
   }
 
-  // yyyy-mm-dd
+  // yyyy-mm-dd (already ISO) — return directly, no Date object needed
   const isoMatch = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (isoMatch) return s.slice(0, 10);
 
   // Excel date/time string "MM/DD/YYYY HH:MM:SS" (some locales)
+  // Parse components to avoid UTC shift
   const usMatch = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
   if (usMatch) {
-    // Try as-is first
-    const dt = new Date(s);
-    if (!isNaN(dt.getTime())) return dt.toISOString().slice(0, 10);
+    const [, m2, d2, y2] = usMatch;
+    const monN = parseInt(m2, 10);
+    const dayN = parseInt(d2, 10);
+    if (monN >= 1 && monN <= 12 && dayN >= 1 && dayN <= 31) {
+      return `${y2}-${m2.padStart(2, '0')}-${d2.padStart(2, '0')}`;
+    }
   }
 
   return null;
 }
+
 
 /**
  * Parse time string to HH:MM:SS.
