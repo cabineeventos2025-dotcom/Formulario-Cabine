@@ -36,6 +36,8 @@ interface FormRecord {
 }
 
 interface HistoricoRecord extends FormRecord {
+  valor_pago_importado: number;
+  valor_a_pagar_importado: number;
   controle_recebimentos?: { valor_pago: number; valor_a_pagar: number; valor_total_contrato: number }[];
 }
 
@@ -496,7 +498,11 @@ export function Admin() {
                       </td>
                     </tr>
                   ) : filteredHistorico.map(f => {
-                    const rec = f.controle_recebimentos?.[0];
+                    // Use valor_pago_importado (formularios_eventos) as primary source
+                    // Fallback to controle_recebimentos if non-zero (manual adjustment)
+                    const cr = f.controle_recebimentos?.[0];
+                    const pago   = (cr && cr.valor_pago   > 0) ? cr.valor_pago   : (f.valor_pago_importado   ?? 0);
+                    const aPagar = (cr && cr.valor_a_pagar > 0) ? cr.valor_a_pagar : (f.valor_a_pagar_importado ?? 0);
                     return (
                       <tr key={f.id}>
                         <td><span className={`badge badge-${f.tipo_pessoa?.toLowerCase()}`}>{f.tipo_pessoa}</span></td>
@@ -510,11 +516,11 @@ export function Admin() {
                         <td style={{ fontSize: '0.8rem' }}>{f.pacote_nome_snapshot || '—'}</td>
                         <td style={{ fontSize: '0.8rem' }}>{f.equipamento_nome_snapshot || '—'}</td>
                         <td style={{ fontSize: '0.8rem', color: 'var(--color-muted)' }}>{f.forma_pagamento || '—'}</td>
-                        <td style={{ fontSize: '0.82rem', fontWeight: 600, color: '#22c55e' }}>
-                          {rec ? formatBRL(rec.valor_pago) : '—'}
+                        <td style={{ fontSize: '0.82rem', fontWeight: 700, color: '#22c55e', whiteSpace: 'nowrap' }}>
+                          {formatBRL(pago)}
                         </td>
-                        <td style={{ fontSize: '0.82rem', fontWeight: 600, color: (rec?.valor_a_pagar ?? 0) > 0 ? '#ef4444' : 'var(--color-muted)' }}>
-                          {rec ? formatBRL(rec.valor_a_pagar) : '—'}
+                        <td style={{ fontSize: '0.82rem', fontWeight: 700, color: aPagar > 0 ? '#ef4444' : 'var(--color-muted)', whiteSpace: 'nowrap' }}>
+                          {formatBRL(aPagar)}
                         </td>
                         <td>
                           <button

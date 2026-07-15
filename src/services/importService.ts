@@ -70,6 +70,10 @@ function buildFormRecord(row: ParsedHistoricalRow, submission_id: string) {
     solicita_nota_fiscal: false,
     sincronizado_planilha: true,
 
+    // Financial values stored directly here (no RLS issue unlike controle_recebimentos)
+    valor_pago_importado: row.valor_pago || 0,
+    valor_a_pagar_importado: row.valor_a_pagar || 0,
+
     // Import metadata
     is_imported: true,
     imported_at: new Date().toISOString(),

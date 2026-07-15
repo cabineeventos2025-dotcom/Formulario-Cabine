@@ -1,843 +1,598 @@
-import React, { useState, useEffect } from 'react';
-import { loadFinancialSummary, toggleNotaFiscal, syncImportadosSemFinanceiro, type FinancialSummaryRow } from '../../services/importService';
+import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
 import { formatBRL } from '../../utils/formatters';
 
-type NFFilter  = 'all' | 'com_nf' | 'sem_nf';
-type SortField = 'data_evento' | 'valor_total_contrato' | 'valor_pago' | 'valor_a_pagar' | 'protocolo';
-type SortDir   = 'asc' | 'desc';
+// ─── Types ─────────────────────────────────────────────────────────────────
 
-interface RecebimentoRecord {
+interface CRRecord {
   id: string;
-  formulario_evento_id: string;
-  valor_total_contrato: number;
+  nota_fiscal_emitida: boolean;
+  numero_nf: string | null;
+  data_emissao_nf: string | null;
   valor_pago: number;
   valor_a_pagar: number;
-  nota_fiscal_emitida: boolean;
-  data_emissao_nf: string | null;
-  numero_nf: string | null;
-  formularios_eventos: {
-    protocolo: string;
-    nome_contratante: string;
-    nome_fantasia: string;
-    data_evento: string;
-    tipo_pessoa: string;
-  };
+  valor_total_contrato: number;
 }
 
-/** Converte YYYY-MM-DD do Supabase para DD/MM/YYYY sem criar objeto Date (evita shift de fuso) */
-function formatDateBR(val: string | null | undefined): string {
+interface FinRow {
+  id: string;
+  protocolo: string;
+  nome_contratante: string;
+  nome_fantasia: string | null;
+  tipo_pessoa: string;
+  data_evento: string | null;
+  valor_pago_importado: number;
+  valor_a_pagar_importado: number;
+  controle_recebimentos: CRRecord[];
+}
+
+type NFFilter   = 'all' | 'com_nf' | 'sem_nf';
+type PagoFilter = 'all' | 'a_receber' | 'quitado';
+type SortField  = 'data_evento' | 'pago' | 'a_pagar' | 'total' | 'protocolo';
+type SortDir    = 'asc' | 'desc';
+
+// ─── Pure helpers ───────────────────────────────────────────────────────────
+
+function fmtDate(val: string | null | undefined): string {
   if (!val) return '—';
   const m = val.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (m) return `${m[3]}/${m[2]}/${m[1]}`;
-  return val;
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : val;
 }
 
-/** Para ordenação: retorna string YYYYMMDD para comparação lexicográfica correta */
 function dateKey(val: string | null | undefined): string {
   if (!val) return '00000000';
   const m = val.match(/^(\d{4})-(\d{2})-(\d{2})/);
   return m ? `${m[1]}${m[2]}${m[3]}` : '00000000';
 }
 
-/** Para filtro por período: converte YYYY-MM-DD para timestamp UTC noon (sem shift) */
-function dateToNoon(ymd: string): number {
-  const m = ymd.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (!m) return 0;
-  return Date.UTC(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3]), 12, 0, 0);
+/** Returns financial values for a row.
+ *  Priority: controle_recebimentos (if non-zero) → valor_pago_importado */
+function getValores(row: FinRow): { pago: number; aPagar: number; total: number } {
+  const cr = row.controle_recebimentos?.[0];
+  // Use controle_recebimentos values if they are non-zero (manually set)
+  const pago   = (cr && cr.valor_pago   > 0) ? cr.valor_pago   : (row.valor_pago_importado   ?? 0);
+  const aPagar = (cr && cr.valor_a_pagar > 0) ? cr.valor_a_pagar : (row.valor_a_pagar_importado ?? 0);
+  return { pago, aPagar, total: pago + aPagar };
 }
 
+function nfEmitida(row: FinRow): boolean {
+  return row.controle_recebimentos?.[0]?.nota_fiscal_emitida ?? false;
+}
+
+// ─── Component ──────────────────────────────────────────────────────────────
+
 export function FinancialSummary() {
+  const [rows,     setRows]     = useState<FinRow[]>([]);
+  const [loading,  setLoading]  = useState(true);
+  const [loadErr,  setLoadErr]  = useState('');
+
+  // Filters
+  const [search,     setSearch]     = useState('');
   const [nfFilter,   setNfFilter]   = useState<NFFilter>('all');
-  const [summary,    setSummary]    = useState<FinancialSummaryRow[]>([]);
-  const [recebimentos, setRecebimentos] = useState<RecebimentoRecord[]>([]);
-  const [loading,    setLoading]    = useState(true);
-  const [toggling,   setToggling]   = useState<string | null>(null);
-  const [editingNF,  setEditingNF]  = useState<string | null>(null);
-  const [nfForm,     setNfForm]     = useState({ data_emissao_nf: '', numero_nf: '' });
-  const [confirmDelRec, setConfirmDelRec] = useState<string | null>(null);
-  const [deleting,   setDeleting]   = useState(false);
-  const [markingPago, setMarkingPago] = useState<string | null>(null);
-  const [confirmMarkPago, setConfirmMarkPago] = useState<string | null>(null);
-  const [pagoFilter, setPagoFilter] = useState<'all' | 'a_receber' | 'quitado'>('all');
-
-  // Zerar painel
-  const [showZerarConfirm, setShowZerarConfirm] = useState(false);
-  const [zerando, setZerando] = useState(false);
-  const [zerarMsg, setZerarMsg] = useState('');
-
-  // Sync
-  const [syncing, setSyncing] = useState(false);
-  const [syncMsg, setSyncMsg] = useState('');
-
-  // Date / period filter
-  const [dateFrom, setDateFrom] = useState('');
-  const [dateTo,   setDateTo]   = useState('');
+  const [pagoFilter, setPagoFilter] = useState<PagoFilter>('all');
+  const [dateFrom,   setDateFrom]   = useState('');
+  const [dateTo,     setDateTo]     = useState('');
 
   // Sort
   const [sortField, setSortField] = useState<SortField>('data_evento');
   const [sortDir,   setSortDir]   = useState<SortDir>('desc');
 
-  useEffect(() => { load(); }, []);
+  // NF editing
+  const [editingNF, setEditingNF] = useState<string | null>(null);
+  const [nfForm,    setNfForm]    = useState({ numero_nf: '', data_emissao_nf: '' });
+  const [savingNF,  setSavingNF]  = useState(false);
 
-  const load = async () => {
+  // Delete
+  const [confirmDel, setConfirmDel] = useState<string | null>(null);
+  const [deleting,   setDeleting]   = useState(false);
+
+  // Zerar
+  const [confirmZerar, setConfirmZerar] = useState(false);
+  const [zerando,      setZerando]      = useState(false);
+
+  // ── Load ──────────────────────────────────────────────────────────────────
+
+  const load = useCallback(async () => {
     setLoading(true);
+    setLoadErr('');
     try {
-      const [sumData, recData] = await Promise.all([
-        loadFinancialSummary(),
-        supabase
-          .from('controle_recebimentos')
-          .select(`
+      const { data, error } = await supabase
+        .from('formularios_eventos')
+        .select(`
+          id,
+          protocolo,
+          nome_contratante,
+          nome_fantasia,
+          tipo_pessoa,
+          data_evento,
+          valor_pago_importado,
+          valor_a_pagar_importado,
+          controle_recebimentos (
             id,
-            formulario_evento_id,
-            valor_total_contrato,
+            nota_fiscal_emitida,
+            numero_nf,
+            data_emissao_nf,
             valor_pago,
             valor_a_pagar,
-            nota_fiscal_emitida,
-            data_emissao_nf,
-            numero_nf,
-            formularios_eventos (
-              protocolo,
-              nome_contratante,
-              nome_fantasia,
-              data_evento,
-              tipo_pessoa
-            )
-          `)
-          .order('formulario_evento_id', { ascending: false }),
-      ]);
-      setSummary(sumData);
-      setRecebimentos((recData.data || []) as unknown as RecebimentoRecord[]);
+            valor_total_contrato
+          )
+        `)
+        .eq('is_imported', true)
+        .order('data_evento', { ascending: false })
+        .limit(2000);
+
+      if (error) {
+        setLoadErr(error.message);
+        console.error('[FinancialSummary] load error:', error);
+      }
+      setRows((data || []) as unknown as FinRow[]);
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  // ── Filtering ─────────────────────────────────────────────────────────────
+
+  const filtered = rows.filter(row => {
+    const { pago, aPagar } = getValores(row);
+    const nome = row.tipo_pessoa === 'PF'
+      ? (row.nome_contratante || '')
+      : (row.nome_fantasia || row.nome_contratante || '');
+
+    if (search) {
+      const q = search.toLowerCase();
+      if (!nome.toLowerCase().includes(q) && !row.protocolo?.toLowerCase().includes(q)) return false;
+    }
+    if (nfFilter === 'com_nf' && !nfEmitida(row)) return false;
+    if (nfFilter === 'sem_nf' &&  nfEmitida(row)) return false;
+    if (pagoFilter === 'quitado'   && aPagar >  0) return false;
+    if (pagoFilter === 'a_receber' && aPagar <= 0) return false;
+
+    if (dateFrom) {
+      const fromKey = dateFrom.replace(/-/g, '');
+      if (dateKey(row.data_evento) < fromKey) return false;
+    }
+    if (dateTo) {
+      const toKey = dateTo.replace(/-/g, '');
+      if (dateKey(row.data_evento) > toKey) return false;
+    }
+    return true;
+  });
+
+  // ── Sorting ───────────────────────────────────────────────────────────────
+
+  const sorted = [...filtered].sort((a, b) => {
+    let va: string | number = '';
+    let vb: string | number = '';
+    switch (sortField) {
+      case 'data_evento': va = dateKey(a.data_evento); vb = dateKey(b.data_evento); break;
+      case 'pago':        va = getValores(a).pago;     vb = getValores(b).pago;     break;
+      case 'a_pagar':     va = getValores(a).aPagar;   vb = getValores(b).aPagar;   break;
+      case 'total':       va = getValores(a).total;    vb = getValores(b).total;    break;
+      case 'protocolo':   va = a.protocolo || '';      vb = b.protocolo || '';      break;
+    }
+    if (va < vb) return sortDir === 'asc' ? -1 : 1;
+    if (va > vb) return sortDir === 'asc' ?  1 : -1;
+    return 0;
+  });
+
+  // ── Totals ────────────────────────────────────────────────────────────────
+
+  const totalPago   = filtered.reduce((s, r) => s + getValores(r).pago,   0);
+  const totalAPagar = filtered.reduce((s, r) => s + getValores(r).aPagar, 0);
+  const totalGeral  = filtered.reduce((s, r) => s + getValores(r).total,  0);
+
+  const comNFRows = rows.filter(nfEmitida);
+  const semNFRows = rows.filter(r => !nfEmitida(r));
+  const totalPagoComNF   = comNFRows.reduce((s, r) => s + getValores(r).pago,   0);
+  const totalPagoSemNF   = semNFRows.reduce((s, r) => s + getValores(r).pago,   0);
+  const totalAPagarComNF = comNFRows.reduce((s, r) => s + getValores(r).aPagar, 0);
+  const totalAPagarSemNF = semNFRows.reduce((s, r) => s + getValores(r).aPagar, 0);
+  const totalContratoComNF = comNFRows.reduce((s, r) => s + getValores(r).total, 0);
+  const totalContratoSemNF = semNFRows.reduce((s, r) => s + getValores(r).total, 0);
+
+  // ── Actions ───────────────────────────────────────────────────────────────
+
+  const toggleSort = (field: SortField) => {
+    if (sortField === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortField(field); setSortDir('desc'); }
   };
 
-  const handleToggleNF = async (rec: RecebimentoRecord) => {
-    if (rec.nota_fiscal_emitida) {
-      setToggling(rec.id);
-      try {
-        await toggleNotaFiscal(rec.id, false);
-        await load();
-      } finally { setToggling(null); }
+  const handleToggleNF = async (row: FinRow) => {
+    const cr = row.controle_recebimentos?.[0];
+    const current = cr?.nota_fiscal_emitida ?? false;
+    if (!cr) {
+      const { pago, aPagar, total } = getValores(row);
+      await supabase.from('controle_recebimentos').insert({
+        formulario_evento_id: row.id,
+        nota_fiscal_emitida: !current,
+        valor_pago: pago, valor_a_pagar: aPagar, valor_total_contrato: total,
+      });
     } else {
-      setEditingNF(rec.id);
-      setNfForm({ data_emissao_nf: '', numero_nf: '' });
+      await supabase.from('controle_recebimentos')
+        .update({ nota_fiscal_emitida: !current })
+        .eq('id', cr.id);
+    }
+    await load();
+  };
+
+  const openEditNF = (row: FinRow) => {
+    const cr = row.controle_recebimentos?.[0];
+    setNfForm({
+      numero_nf: cr?.numero_nf || '',
+      data_emissao_nf: cr?.data_emissao_nf || '',
+    });
+    setEditingNF(row.id);
+  };
+
+  const handleSaveNF = async (row: FinRow) => {
+    setSavingNF(true);
+    try {
+      const cr = row.controle_recebimentos?.[0];
+      const payload = {
+        nota_fiscal_emitida: true,
+        numero_nf: nfForm.numero_nf || null,
+        data_emissao_nf: nfForm.data_emissao_nf || null,
+      };
+      if (!cr) {
+        const { pago, aPagar, total } = getValores(row);
+        await supabase.from('controle_recebimentos').insert({
+          formulario_evento_id: row.id,
+          valor_pago: pago, valor_a_pagar: aPagar, valor_total_contrato: total,
+          ...payload,
+        });
+      } else {
+        await supabase.from('controle_recebimentos').update(payload).eq('id', cr.id);
+      }
+      setEditingNF(null);
+      await load();
+    } finally {
+      setSavingNF(false);
     }
   };
 
-  const handleSaveNF = async (recId: string) => {
-    setToggling(recId);
-    try {
-      await toggleNotaFiscal(recId, true, {
-        data_emissao_nf: nfForm.data_emissao_nf || undefined,
-        numero_nf: nfForm.numero_nf || undefined,
-      });
-      setEditingNF(null);
-      await load();
-    } finally { setToggling(null); }
-  };
-
-  const handleDeleteRec = async (id: string) => {
+  const handleDelete = async (row: FinRow) => {
     setDeleting(true);
     try {
-      await supabase.from('controle_recebimentos').delete().eq('id', id);
-      setConfirmDelRec(null);
-      await load();
+      await supabase.from('controle_recebimentos').delete().eq('formulario_evento_id', row.id);
+      await supabase.from('formularios_eventos').delete().eq('id', row.id);
+      setConfirmDel(null);
+      setRows(prev => prev.filter(r => r.id !== row.id));
     } finally {
       setDeleting(false);
     }
   };
 
-  const handleMarkAsPago = async (rec: RecebimentoRecord) => {
-    setMarkingPago(rec.id);
-    try {
-      await supabase
-        .from('controle_recebimentos')
-        .update({
-          valor_pago: rec.valor_total_contrato,
-          valor_a_pagar: 0,
-        })
-        .eq('id', rec.id);
-      setConfirmMarkPago(null);
-      await load();
-    } finally {
-      setMarkingPago(null);
-    }
-  };
-
-  const handleZerarPainel = async () => {
+  const handleZerar = async () => {
     setZerando(true);
-    setZerarMsg('');
     try {
-      // 1. Busca todos os IDs de recebimentos
-      const { data: recs, error: recErr } = await supabase
-        .from('controle_recebimentos')
-        .select('id, formulario_evento_id');
-
-      if (recErr) throw new Error(recErr.message);
-
-      if (!recs || recs.length === 0) {
-        setZerarMsg('Painel já está vazio.');
-        setShowZerarConfirm(false);
-        return;
+      const { data: ids } = await supabase
+        .from('formularios_eventos').select('id').eq('is_imported', true);
+      if (ids?.length) {
+        await supabase.from('controle_recebimentos')
+          .delete().in('formulario_evento_id', ids.map((r: any) => r.id));
       }
-
-      // 2. Deleta todos os controle_recebimentos
-      const { error: delRecErr } = await supabase
-        .from('controle_recebimentos')
-        .delete()
-        .neq('id', '00000000-0000-0000-0000-000000000000'); // delete all
-
-      if (delRecErr) throw new Error(`Erro ao excluir recebimentos: ${delRecErr.message}`);
-
-      // 3. Deleta os formulários que vieram de importação
-      const importedIds = recs
-        .map(r => r.formulario_evento_id)
-        .filter(Boolean);
-
-      if (importedIds.length > 0) {
-        // Só deleta os importados (is_imported = true) para não perder formulários reais do site
-        const { error: delFormErr } = await supabase
-          .from('formularios_eventos')
-          .delete()
-          .in('id', importedIds)
-          .eq('is_imported', true);
-
-        if (delFormErr) {
-          console.warn('[zerarPainel] Aviso ao excluir formulários importados:', delFormErr.message);
-        }
-      }
-
-      setShowZerarConfirm(false);
-      setZerarMsg(`✅ Painel zerado com sucesso! ${recs.length} registro(s) removido(s).`);
-      await load();
-    } catch (err: any) {
-      setZerarMsg(`❌ Erro: ${err.message}`);
+      await supabase.from('formularios_eventos').delete().eq('is_imported', true);
+      setRows([]);
+      setConfirmZerar(false);
     } finally {
       setZerando(false);
     }
   };
 
-  const handleSync = async () => {
-    setSyncing(true);
-    setSyncMsg('');
-    try {
-      const res = await syncImportadosSemFinanceiro();
-      if (res.created === 0 && res.errors.length === 0) {
-        setSyncMsg('✅ Todos os registros já estão sincronizados.');
-      } else if (res.errors.length > 0) {
-        setSyncMsg(`⚠️ ${res.created} criados, ${res.errors.length} erro(s): ${res.errors[0]}`);
-      } else {
-        setSyncMsg(`✅ ${res.created} registro(s) financeiros criados com sucesso!`);
-      }
-      await load();
-    } catch (err: any) {
-      setSyncMsg(`❌ Erro: ${err.message}`);
-    } finally {
-      setSyncing(false);
-    }
-  };
+  // ── Render ────────────────────────────────────────────────────────────────
 
-  const handleSort = (field: SortField) => {
-    if (sortField === field) {
-      setSortDir(d => d === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortField(field);
-      setSortDir('asc');
-    }
-  };
-
-  const SortIcon = ({ field }: { field: SortField }) => {
-    if (sortField !== field) return <span style={{ opacity: 0.3 }}> ⇅</span>;
-    return <span style={{ color: 'var(--color-secondary)' }}>{sortDir === 'asc' ? ' ↑' : ' ↓'}</span>;
-  };
-
-  // ── Apply filters ──
-  const filtered = recebimentos.filter(r => {
-    // NF filter
-    if (nfFilter === 'com_nf' && !r.nota_fiscal_emitida) return false;
-    if (nfFilter === 'sem_nf' && r.nota_fiscal_emitida)  return false;
-
-    // Pago/A receber filter
-    if (pagoFilter === 'a_receber' && Number(r.valor_a_pagar || 0) <= 0) return false;
-    if (pagoFilter === 'quitado'   && Number(r.valor_a_pagar || 0) >  0) return false;
-
-    // Date/period filter (by data_evento)
-    const fe = r.formularios_eventos as any;
-    const evDateStr: string | null = fe?.data_evento || null;
-    if (dateFrom && evDateStr) {
-      if (dateToNoon(evDateStr) < dateToNoon(dateFrom)) return false;
-    }
-    if (dateTo && evDateStr) {
-      if (dateToNoon(evDateStr) > dateToNoon(dateTo)) return false;
-    }
-
-    return true;
-  });
-
-  // ── Apply sort ──
-  const sorted = [...filtered].sort((a, b) => {
-    const feA = a.formularios_eventos as any;
-    const feB = b.formularios_eventos as any;
-    let valA: any;
-    let valB: any;
-
-    switch (sortField) {
-      case 'data_evento':
-        valA = dateKey(feA?.data_evento);
-        valB = dateKey(feB?.data_evento);
-        break;
-      case 'protocolo':
-        valA = feA?.protocolo || '';
-        valB = feB?.protocolo || '';
-        break;
-      case 'valor_total_contrato':
-        valA = Number(a.valor_total_contrato || 0);
-        valB = Number(b.valor_total_contrato || 0);
-        break;
-      case 'valor_pago':
-        valA = Number(a.valor_pago || 0);
-        valB = Number(b.valor_pago || 0);
-        break;
-      case 'valor_a_pagar':
-        valA = Number(a.valor_a_pagar || 0);
-        valB = Number(b.valor_a_pagar || 0);
-        break;
-    }
-
-    if (valA < valB) return sortDir === 'asc' ? -1 : 1;
-    if (valA > valB) return sortDir === 'asc' ? 1 : -1;
-    return 0;
-  });
-
-  // ── Totals ──
-  const comNF  = summary.find(s => s.nota_fiscal_emitida);
-  const semNF  = summary.find(s => !s.nota_fiscal_emitida);
-  const totals = {
-    total_pago:     (comNF?.total_pago || 0) + (semNF?.total_pago || 0),
-    total_a_pagar:  (comNF?.total_a_pagar || 0) + (semNF?.total_a_pagar || 0),
-    total_contrato: (comNF?.total_contrato || 0) + (semNF?.total_contrato || 0),
-    total_eventos:  (comNF?.total_eventos || 0) + (semNF?.total_eventos || 0),
-  };
-
-  const filteredTotals = {
-    pago:  sorted.reduce((s, r) => s + Number(r.valor_pago || 0), 0),
-    falta: sorted.reduce((s, r) => s + Number(r.valor_a_pagar || 0), 0),
-    total: sorted.reduce((s, r) => s + Number(r.valor_total_contrato || 0), 0),
-  };
-
-  const inputStyle: React.CSSProperties = {
-    padding: '6px 10px',
-    borderRadius: 8,
-    border: '1px solid var(--color-surface-border)',
-    background: 'var(--color-surface)',
-    color: 'var(--color-text)',
-    fontSize: '0.83rem',
-    height: 34,
-  };
-
-  const chipStyle = (active: boolean): React.CSSProperties => ({
-    padding: '5px 14px',
-    borderRadius: 20,
-    border: '1px solid',
-    cursor: 'pointer',
-    fontWeight: active ? 700 : 400,
-    fontSize: '0.83rem',
-    background: active ? 'var(--color-secondary)' : 'transparent',
-    borderColor: active ? 'var(--color-secondary)' : 'var(--color-surface-border)',
-    color: active ? '#000' : 'var(--color-text-secondary)',
-    transition: 'all 0.2s',
-    whiteSpace: 'nowrap' as const,
-  });
-
-  if (loading) return (
-    <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
-      <div className="spinner" />
-    </div>
+  const Th = ({ field, label, style }: { field: SortField; label: string; style?: React.CSSProperties }) => (
+    <th
+      onClick={() => toggleSort(field)}
+      style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap', ...style }}
+    >
+      {label} {sortField === field ? (sortDir === 'asc' ? '↑' : '↓') : <span style={{ opacity: 0.4 }}>↕</span>}
+    </th>
   );
 
   return (
     <div>
-      {/* Header row with title + Zerar button */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4, flexWrap: 'wrap', gap: 12 }}>
         <div>
-          <div className="admin-page-title">Painel Financeiro</div>
-          <div className="admin-page-subtitle">Subtotais de recebimentos com controle de Nota Fiscal.</div>
+          <div className="admin-page-title">Financeiro / NF</div>
+          <div className="admin-page-subtitle">Controle financeiro de eventos históricos importados.</div>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-          {/* Sync button */}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <button
-            onClick={handleSync}
-            disabled={syncing}
-            style={{
-              padding: '8px 16px', borderRadius: 8,
-              border: '1px solid rgba(34,197,94,0.4)',
-              background: 'rgba(34,197,94,0.06)',
-              color: '#22c55e', cursor: syncing ? 'wait' : 'pointer',
-              fontSize: '0.82rem', fontWeight: 600, whiteSpace: 'nowrap',
-              transition: 'all 0.2s',
-            }}
-            onMouseEnter={e => { if (!syncing) (e.currentTarget as HTMLButtonElement).style.background = 'rgba(34,197,94,0.15)'; }}
-            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(34,197,94,0.06)'; }}
-            title="Cria registros financeiros para importações que ainda não aparecem no financeiro"
-          >
-            {syncing ? '⏳ Sincronizando...' : '🔄 Sincronizar financeiro'}
-          </button>
-          {/* Zerar button */}
-          <button
-            onClick={() => { setShowZerarConfirm(true); setZerarMsg(''); }}
-            style={{
-              padding: '8px 16px', borderRadius: 8,
-              border: '1px solid rgba(239,68,68,0.4)',
-              background: 'rgba(239,68,68,0.06)',
-              color: '#ef4444', cursor: 'pointer',
-              fontSize: '0.82rem', fontWeight: 600, whiteSpace: 'nowrap',
-              transition: 'all 0.2s',
-            }}
-            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.15)'; }}
-            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.06)'; }}
-            title="Apagar todos os registros financeiros e importados"
-          >
-            🗑️ Zerar painel
-          </button>
+            onClick={load}
+            style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid var(--color-surface-border)', background: 'transparent', color: 'var(--color-text-secondary)', cursor: 'pointer', fontSize: '0.82rem' }}
+          >🔄 Atualizar</button>
+          {rows.length > 0 && (
+            <button
+              onClick={() => setConfirmZerar(true)}
+              style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid rgba(239,68,68,0.4)', background: 'rgba(239,68,68,0.06)', color: '#ef4444', cursor: 'pointer', fontSize: '0.82rem', fontWeight: 600 }}
+            >🗑️ Zerar painel</button>
+          )}
         </div>
       </div>
 
-      {/* Zerar confirmation modal */}
-      {showZerarConfirm && (
-        <div style={{
-          position: 'fixed', inset: 0, zIndex: 2000,
-          background: 'rgba(0,0,0,0.7)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          padding: 16,
-        }}
-          onClick={e => { if (e.target === e.currentTarget && !zerando) setShowZerarConfirm(false); }}
-        >
-          <div style={{
-            background: 'var(--color-surface)',
-            border: '1px solid rgba(239,68,68,0.4)',
-            borderRadius: 16,
-            padding: 32,
-            maxWidth: 440,
-            width: '100%',
-          }}>
-            <div style={{ fontSize: '2.5rem', textAlign: 'center', marginBottom: 12 }}>🗑️</div>
-            <div style={{ fontWeight: 700, fontSize: '1.1rem', color: 'var(--color-text)', textAlign: 'center', marginBottom: 8 }}>
-              Zerar todo o painel financeiro?
-            </div>
-            <div style={{ fontSize: '0.88rem', color: 'var(--color-text-secondary)', textAlign: 'center', marginBottom: 24, lineHeight: 1.6 }}>
-              Esta ação irá excluir <strong>todos os {recebimentos.length} registros financeiros</strong> e os
-              formulários importados do Excel vinculados a eles.<br />
-              <strong style={{ color: '#ef4444' }}>Esta ação não pode ser desfeita.</strong>
-            </div>
-            <div style={{ display: 'flex', gap: 12 }}>
-              <button
-                onClick={() => setShowZerarConfirm(false)}
-                disabled={zerando}
-                style={{
-                  flex: 1, padding: '10px 16px', borderRadius: 8,
-                  border: '1px solid var(--color-surface-border)',
-                  background: 'transparent', color: 'var(--color-text-secondary)',
-                  cursor: 'pointer', fontWeight: 600, fontSize: '0.875rem',
-                }}
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={handleZerarPainel}
-                disabled={zerando}
-                style={{
-                  flex: 1, padding: '10px 16px', borderRadius: 8,
-                  border: 'none',
-                  background: zerando ? '#999' : '#ef4444',
-                  color: '#fff', cursor: zerando ? 'wait' : 'pointer',
-                  fontWeight: 700, fontSize: '0.875rem',
-                  transition: 'background 0.2s',
-                }}
-              >
-                {zerando ? '⏳ Apagando...' : '🗑️ Sim, zerar tudo'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Feedback messages */}
-      {(zerarMsg || syncMsg) && (
-        <div style={{
-          padding: '10px 16px', borderRadius: 8, marginBottom: 16,
-          background: (zerarMsg || syncMsg).startsWith('✅') ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
-          color: (zerarMsg || syncMsg).startsWith('✅') ? '#22c55e' : '#ef4444',
-          fontSize: '0.875rem', fontWeight: 600,
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-        }}>
-          <span>{zerarMsg || syncMsg}</span>
-          <button onClick={() => { setZerarMsg(''); setSyncMsg(''); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontSize: '1rem' }}>✕</button>
-        </div>
-      )}
-
-      {/* Big summary cards */}
-      <div className="stats-grid" style={{ marginBottom: 32 }}>
-        {[
-          { label: 'Total de eventos', value: totals.total_eventos },
-          { label: 'Total recebido',   value: formatBRL(totals.total_pago) },
-          { label: 'Ainda a receber',  value: formatBRL(totals.total_a_pagar), highlight: true },
-          { label: 'Total contratos',  value: formatBRL(totals.total_contrato) },
-        ].map(c => (
-          <div key={c.label} className="stat-card" style={c.highlight ? { borderColor: '#ef4444' } : {}}>
-            <div className="stat-value" style={c.highlight ? { color: '#ef4444' } : {}}>{c.value}</div>
-            <div className="stat-label">{c.label}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* NF breakdown */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 28 }}>
-        {[
-          { label: '✅ Com Nota Fiscal', data: comNF, color: '#22c55e', bg: 'rgba(34,197,94,0.08)', border: 'rgba(34,197,94,0.3)' },
-          { label: '❌ Sem Nota Fiscal', data: semNF, color: '#ef4444', bg: 'rgba(239,68,68,0.08)', border: 'rgba(239,68,68,0.3)' },
-        ].map(card => (
-          <div key={card.label} style={{ background: card.bg, border: `1px solid ${card.border}`, borderRadius: 12, padding: '20px 24px' }}>
-            <div style={{ fontWeight: 700, color: card.color, marginBottom: 12, fontSize: '0.95rem' }}>{card.label}</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div>
-                <div style={{ fontSize: '0.7rem', color: 'var(--color-muted)', marginBottom: 4 }}>Eventos</div>
-                <div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--color-text)' }}>{card.data?.total_eventos || 0}</div>
-              </div>
-              <div>
-                <div style={{ fontSize: '0.7rem', color: 'var(--color-muted)', marginBottom: 4 }}>Recebido</div>
-                <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#22c55e' }}>{formatBRL(card.data?.total_pago || 0)}</div>
-              </div>
-              <div>
-                <div style={{ fontSize: '0.7rem', color: 'var(--color-muted)', marginBottom: 4 }}>A receber</div>
-                <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#ef4444' }}>{formatBRL(card.data?.total_a_pagar || 0)}</div>
-              </div>
-              <div>
-                <div style={{ fontSize: '0.7rem', color: 'var(--color-muted)', marginBottom: 4 }}>Total contratos</div>
-                <div style={{ fontSize: '1.1rem', fontWeight: 700, color: card.color }}>{formatBRL(card.data?.total_contrato || 0)}</div>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* ── FILTERS BAR ── */}
-      <div style={{
-        background: 'var(--color-surface)',
-        border: '1px solid var(--color-surface-border)',
-        borderRadius: 12,
-        padding: '16px 20px',
-        marginBottom: 16,
-        display: 'flex',
-        flexWrap: 'wrap',
-        gap: 16,
-        alignItems: 'flex-end',
-      }}>
-        {/* Situação filter chips */}
-        <div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--color-muted)', marginBottom: 6, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-            Situação
-          </div>
-          <div style={{ display: 'flex', gap: 6 }}>
-            {([
-              { id: 'all',       label: 'Todos' },
-              { id: 'a_receber', label: '🔴 A receber' },
-              { id: 'quitado',   label: '✅ Quitado' },
-            ] as { id: 'all'|'a_receber'|'quitado'; label: string }[]).map(f => (
-              <button key={f.id} onClick={() => setPagoFilter(f.id)} style={chipStyle(pagoFilter === f.id)}>
-                {f.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* NF filter chips */}
-        <div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--color-muted)', marginBottom: 6, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-            Nota Fiscal
-          </div>
-          <div style={{ display: 'flex', gap: 6 }}>
-            {([
-              { id: 'all',    label: 'Todos' },
-              { id: 'com_nf', label: '✅ Com NF' },
-              { id: 'sem_nf', label: '❌ Sem NF' },
-            ] as { id: NFFilter; label: string }[]).map(f => (
-              <button key={f.id} onClick={() => setNfFilter(f.id)} style={chipStyle(nfFilter === f.id)}>
-                {f.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Period: from */}
-        <div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--color-muted)', marginBottom: 6, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-            Evento: de
-          </div>
-          <input
-            type="date"
-            style={inputStyle}
-            value={dateFrom}
-            onChange={e => setDateFrom(e.target.value)}
-          />
-        </div>
-
-        {/* Period: to */}
-        <div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--color-muted)', marginBottom: 6, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-            Evento: até
-          </div>
-          <input
-            type="date"
-            style={inputStyle}
-            value={dateTo}
-            onChange={e => setDateTo(e.target.value)}
-          />
-        </div>
-
-        {/* Clear button */}
-        {(dateFrom || dateTo || nfFilter !== 'all' || pagoFilter !== 'all') && (
-          <button
-            onClick={() => { setDateFrom(''); setDateTo(''); setNfFilter('all'); setPagoFilter('all'); }}
-            style={{
-              ...chipStyle(false),
-              borderColor: 'rgba(239,68,68,0.4)',
-              color: '#ef4444',
-              alignSelf: 'flex-end',
-            }}
-          >
-            ✕ Limpar filtros
-          </button>
-        )}
-
-        {/* Subtotals */}
-        <div style={{ marginLeft: 'auto', display: 'flex', flexDirection: 'column', gap: 4, alignSelf: 'flex-end', textAlign: 'right' }}>
-          <span style={{ fontSize: '0.8rem', color: 'var(--color-muted)' }}>
-            {sorted.length} registro{sorted.length !== 1 ? 's' : ''} filtrado{sorted.length !== 1 ? 's' : ''}
+      {/* Error alert */}
+      {loadErr && (
+        <div style={{ background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.4)', borderRadius: 10, padding: '14px 18px', marginBottom: 20, fontSize: '0.85rem', color: '#ef4444' }}>
+          <strong>⚠️ Erro ao carregar:</strong> {loadErr}
+          <br />
+          <span style={{ fontSize: '0.78rem', opacity: 0.85 }}>
+            Execute a migration <strong>007_financial_columns.sql</strong> no Supabase SQL Editor e tente novamente.
           </span>
-          <div style={{ display: 'flex', gap: 16 }}>
-            <span style={{ fontSize: '0.83rem', color: 'var(--color-muted)' }}>
-              Pago: <strong style={{ color: '#22c55e' }}>{formatBRL(filteredTotals.pago)}</strong>
-            </span>
-            <span style={{ fontSize: '0.83rem', color: 'var(--color-muted)' }}>
-              A receber: <strong style={{ color: '#ef4444' }}>{formatBRL(filteredTotals.falta)}</strong>
-            </span>
-            <span style={{ fontSize: '0.83rem', color: 'var(--color-muted)' }}>
-              Total: <strong style={{ color: 'var(--color-secondary)' }}>{formatBRL(filteredTotals.total)}</strong>
-            </span>
+        </div>
+      )}
+
+      {/* NF Summary cards */}
+      {!loading && rows.length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
+          {/* Com NF */}
+          <div style={{ background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.25)', borderRadius: 14, padding: '20px 24px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
+              <span style={{ fontWeight: 700, fontSize: '0.95rem', color: '#22c55e' }}>✅ Com Nota Fiscal</span>
+              <span style={{ fontWeight: 700, fontSize: '1.1rem', color: 'var(--color-text)' }}>{comNFRows.length}</span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, fontSize: '0.82rem' }}>
+              <div><div style={{ color: 'var(--color-muted)', marginBottom: 2 }}>Recebido</div><div style={{ fontWeight: 700, color: '#22c55e' }}>{formatBRL(totalPagoComNF)}</div></div>
+              <div><div style={{ color: 'var(--color-muted)', marginBottom: 2 }}>A receber</div><div style={{ fontWeight: 700, color: 'var(--color-text)' }}>{formatBRL(totalAPagarComNF)}</div></div>
+              <div><div style={{ color: 'var(--color-muted)', marginBottom: 2 }}>Total contratos</div><div style={{ fontWeight: 700 }}>{formatBRL(totalContratoComNF)}</div></div>
+            </div>
+          </div>
+          {/* Sem NF */}
+          <div style={{ background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.2)', borderRadius: 14, padding: '20px 24px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
+              <span style={{ fontWeight: 700, fontSize: '0.95rem', color: '#ef4444' }}>✗ Sem Nota Fiscal</span>
+              <span style={{ fontWeight: 700, fontSize: '1.1rem', color: 'var(--color-text)' }}>{semNFRows.length}</span>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, fontSize: '0.82rem' }}>
+              <div><div style={{ color: 'var(--color-muted)', marginBottom: 2 }}>Recebido</div><div style={{ fontWeight: 700, color: '#22c55e' }}>{formatBRL(totalPagoSemNF)}</div></div>
+              <div><div style={{ color: 'var(--color-muted)', marginBottom: 2 }}>A receber</div><div style={{ fontWeight: 700, color: '#ef4444' }}>{formatBRL(totalAPagarSemNF)}</div></div>
+              <div><div style={{ color: 'var(--color-muted)', marginBottom: 2 }}>Total contratos</div><div style={{ fontWeight: 700 }}>{formatBRL(totalContratoSemNF)}</div></div>
+            </div>
           </div>
         </div>
+      )}
+
+      {/* Filters */}
+      <div style={{ background: 'var(--color-surface-hover)', border: '1px solid var(--color-surface-border)', borderRadius: 12, padding: '16px 20px', marginBottom: 20 }}>
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+          {/* Search */}
+          <input
+            type="text"
+            placeholder="Buscar nome ou protocolo..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            style={{ flex: '1 1 200px', minWidth: 180, padding: '8px 12px', borderRadius: 8, border: '1px solid var(--color-surface-border)', background: 'var(--color-surface)', color: 'var(--color-text)', fontSize: '0.85rem' }}
+          />
+
+          {/* Situação filter */}
+          <div style={{ display: 'flex', gap: 6 }}>
+            {(['all', 'a_receber', 'quitado'] as PagoFilter[]).map(f => (
+              <button key={f} onClick={() => setPagoFilter(f)}
+                style={{ padding: '6px 12px', borderRadius: 20, border: 'none', cursor: 'pointer', fontSize: '0.78rem', fontWeight: 600,
+                  background: pagoFilter === f ? 'var(--color-secondary)' : 'var(--color-surface)',
+                  color: pagoFilter === f ? '#fff' : 'var(--color-text-secondary)' }}
+              >{f === 'all' ? 'Todos' : f === 'a_receber' ? '● A receber' : '✔ Quitado'}</button>
+            ))}
+          </div>
+
+          {/* NF filter */}
+          <div style={{ display: 'flex', gap: 6 }}>
+            {(['all', 'com_nf', 'sem_nf'] as NFFilter[]).map(f => (
+              <button key={f} onClick={() => setNfFilter(f)}
+                style={{ padding: '6px 12px', borderRadius: 20, border: 'none', cursor: 'pointer', fontSize: '0.78rem', fontWeight: 600,
+                  background: nfFilter === f ? 'var(--color-secondary)' : 'var(--color-surface)',
+                  color: nfFilter === f ? '#fff' : 'var(--color-text-secondary)' }}
+              >{f === 'all' ? 'Todos NF' : f === 'com_nf' ? '✅ Com NF' : '✗ Sem NF'}</button>
+            ))}
+          </div>
+
+          {/* Date range */}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <span style={{ fontSize: '0.78rem', color: 'var(--color-muted)', whiteSpace: 'nowrap' }}>Evento:</span>
+            <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+              style={{ padding: '6px 10px', borderRadius: 8, border: '1px solid var(--color-surface-border)', background: 'var(--color-surface)', color: 'var(--color-text)', fontSize: '0.78rem' }} />
+            <span style={{ color: 'var(--color-muted)', fontSize: '0.78rem' }}>até</span>
+            <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+              style={{ padding: '6px 10px', borderRadius: 8, border: '1px solid var(--color-surface-border)', background: 'var(--color-surface)', color: 'var(--color-text)', fontSize: '0.78rem' }} />
+          </div>
+        </div>
+
+        {/* Totals bar */}
+        {filtered.length > 0 && (
+          <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--color-surface-border)', display: 'flex', gap: 24, flexWrap: 'wrap', fontSize: '0.85rem' }}>
+            <span style={{ color: 'var(--color-muted)' }}>{filtered.length} registro(s) filtrado(s)</span>
+            <span>Pago: <strong style={{ color: '#22c55e' }}>{formatBRL(totalPago)}</strong></span>
+            <span>A receber: <strong style={{ color: '#ef4444' }}>{formatBRL(totalAPagar)}</strong></span>
+            <span>Total: <strong style={{ color: 'var(--color-secondary)' }}>{formatBRL(totalGeral)}</strong></span>
+          </div>
+        )}
       </div>
 
-      {/* ── TABLE ── */}
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-          <thead>
-            <tr>
-              {([
-                { label: 'Protocolo',    field: 'protocolo'            },
-                { label: 'Contratante',  field: null                   },
-                { label: 'Data Evento',  field: 'data_evento'          },
-                { label: 'Pago',         field: 'valor_pago'           },
-                { label: 'A Receber',    field: 'valor_a_pagar'        },
-                { label: 'Total',        field: 'valor_total_contrato' },
-                { label: 'NF Emitida',   field: null                   },
-                { label: 'Nº NF',        field: null                   },
-                { label: 'Ações',        field: null                   },
-              ] as { label: string; field: SortField | null }[]).map(h => (
-                <th
-                  key={h.label}
-                  onClick={h.field ? () => handleSort(h.field!) : undefined}
-                  style={{
-                    padding: '10px 12px',
-                    textAlign: 'left',
-                    background: 'var(--color-surface-hover)',
-                    color: sortField === h.field ? 'var(--color-secondary)' : 'var(--color-text-secondary)',
-                    fontWeight: 600,
-                    borderBottom: '1px solid var(--color-surface-border)',
-                    whiteSpace: 'nowrap',
-                    cursor: h.field ? 'pointer' : 'default',
-                    userSelect: 'none',
-                    transition: 'color 0.15s',
-                  }}
-                >
-                  {h.label}{h.field && <SortIcon field={h.field} />}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.length === 0 && (
+      {/* Table */}
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: 60, color: 'var(--color-muted)' }}>
+          <div className="spinner" style={{ margin: '0 auto 16px' }} />
+          Carregando...
+        </div>
+      ) : rows.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: 60, color: 'var(--color-muted)' }}>
+          <div style={{ fontSize: '3rem', marginBottom: 12 }}>📊</div>
+          <div style={{ fontWeight: 600, marginBottom: 8 }}>Nenhum registro financeiro</div>
+          <div style={{ fontSize: '0.85rem', lineHeight: 1.6 }}>
+            Importe a planilha na aba <strong>Histórico</strong> para ver os dados aqui.
+          </div>
+        </div>
+      ) : (
+        <div className="admin-table-wrapper">
+          <table className="admin-table">
+            <thead>
               <tr>
-                <td colSpan={8} style={{ padding: '32px', textAlign: 'center', color: 'var(--color-muted)' }}>
-                  Nenhum registro encontrado para os filtros selecionados.
-                </td>
+                <Th field="protocolo"   label="Protocolo" />
+                <th>Contratante</th>
+                <Th field="data_evento" label="Data Evento" />
+                <Th field="pago"        label="Pago" style={{ color: '#22c55e' }} />
+                <Th field="a_pagar"     label="A Receber" />
+                <Th field="total"       label="Total" />
+                <th>NF Emitida</th>
+                <th>Nº NF</th>
+                <th>Ações</th>
               </tr>
-            )}
-            {sorted.map(rec => {
-              const fe = rec.formularios_eventos as any;
-              const nome = fe?.tipo_pessoa === 'PF' ? fe?.nome_contratante : fe?.nome_fantasia;
-              return (
-                <React.Fragment key={rec.id}>
-                  <tr style={{
-                    borderBottom: '1px solid var(--color-surface-border)',
-                    background: editingNF === rec.id ? 'rgba(247,148,29,0.05)' : undefined,
-                    transition: 'background 0.15s',
-                  }}>
-                    <td style={{ padding: '10px 12px', fontFamily: 'monospace', fontSize: '0.78rem', color: 'var(--color-secondary)' }}>
-                      {fe?.protocolo || '—'}
+            </thead>
+            <tbody>
+              {sorted.map(row => {
+                const { pago, aPagar, total } = getValores(row);
+                const cr = row.controle_recebimentos?.[0];
+                const nf = nfEmitida(row);
+                const nome = row.tipo_pessoa === 'PF'
+                  ? row.nome_contratante
+                  : (row.nome_fantasia || row.nome_contratante);
+                const isEditingThis = editingNF === row.id;
+                const isConfirmDel  = confirmDel  === row.id;
+
+                return (
+                  <tr key={row.id}>
+                    {/* Protocolo */}
+                    <td>
+                      <code style={{ fontSize: '0.72rem', color: 'var(--color-secondary)', fontWeight: 600 }}>
+                        {row.protocolo}
+                      </code>
                     </td>
-                    <td style={{ padding: '10px 12px', color: 'var(--color-text)', fontWeight: 500 }}>
-                      {nome || '—'}
+
+                    {/* Nome */}
+                    <td style={{ maxWidth: 200, fontWeight: 500, fontSize: '0.875rem' }}>{nome}</td>
+
+                    {/* Data evento */}
+                    <td style={{ whiteSpace: 'nowrap', fontSize: '0.85rem' }}>{fmtDate(row.data_evento)}</td>
+
+                    {/* Pago */}
+                    <td style={{ fontWeight: 700, color: '#22c55e', whiteSpace: 'nowrap' }}>
+                      {formatBRL(pago)}
                     </td>
-                    <td style={{ padding: '10px 12px', color: 'var(--color-text-secondary)' }}>
-                      {formatDateBR(fe?.data_evento)}
+
+                    {/* A receber */}
+                    <td style={{ fontWeight: 600, color: aPagar > 0 ? '#ef4444' : 'var(--color-muted)', whiteSpace: 'nowrap' }}>
+                      {formatBRL(aPagar)}
                     </td>
-                    <td style={{ padding: '10px 12px', color: '#22c55e', fontWeight: 600 }}>
-                      {formatBRL(rec.valor_pago)}
+
+                    {/* Total */}
+                    <td style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>{formatBRL(total)}</td>
+
+                    {/* NF */}
+                    <td>
+                      {isEditingThis ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 180 }}>
+                          <input
+                            type="text"
+                            placeholder="Nº NF"
+                            value={nfForm.numero_nf}
+                            onChange={e => setNfForm(p => ({ ...p, numero_nf: e.target.value }))}
+                            style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid var(--color-surface-border)', background: 'var(--color-surface)', color: 'var(--color-text)', fontSize: '0.8rem' }}
+                          />
+                          <input
+                            type="date"
+                            value={nfForm.data_emissao_nf}
+                            onChange={e => setNfForm(p => ({ ...p, data_emissao_nf: e.target.value }))}
+                            style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid var(--color-surface-border)', background: 'var(--color-surface)', color: 'var(--color-text)', fontSize: '0.8rem' }}
+                          />
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <button
+                              onClick={() => handleSaveNF(row)}
+                              disabled={savingNF}
+                              style={{ flex: 1, padding: '5px 8px', borderRadius: 6, border: 'none', background: '#22c55e', color: '#fff', cursor: 'pointer', fontSize: '0.78rem', fontWeight: 700 }}
+                            >{savingNF ? '...' : '✓ Salvar'}</button>
+                            <button
+                              onClick={() => setEditingNF(null)}
+                              style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid var(--color-surface-border)', background: 'transparent', cursor: 'pointer', fontSize: '0.78rem' }}
+                            >✕</button>
+                          </div>
+                        </div>
+                      ) : nf ? (
+                        <button
+                          onClick={() => handleToggleNF(row)}
+                          style={{ padding: '4px 10px', borderRadius: 6, border: 'none', background: 'rgba(34,197,94,0.15)', color: '#22c55e', cursor: 'pointer', fontSize: '0.78rem', fontWeight: 700 }}
+                        >✅ Emitida</button>
+                      ) : (
+                        <button
+                          onClick={() => openEditNF(row)}
+                          style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid rgba(239,68,68,0.4)', background: 'rgba(239,68,68,0.08)', color: '#ef4444', cursor: 'pointer', fontSize: '0.78rem', fontWeight: 600 }}
+                        >✗ Não emitida</button>
+                      )}
                     </td>
-                    <td style={{ padding: '10px 12px', color: rec.valor_a_pagar > 0 ? '#ef4444' : 'var(--color-muted)', fontWeight: rec.valor_a_pagar > 0 ? 600 : 400 }}>
-                      {formatBRL(rec.valor_a_pagar)}
-                    </td>
-                    <td style={{ padding: '10px 12px', color: 'var(--color-text-secondary)' }}>
-                      {formatBRL(rec.valor_total_contrato)}
-                    </td>
-                    <td style={{ padding: '10px 12px' }}>
-                      <button
-                        disabled={toggling === rec.id}
-                        onClick={() => handleToggleNF(rec)}
-                        style={{
-                          padding: '4px 12px',
-                          borderRadius: 6,
-                          border: '1px solid',
-                          cursor: toggling === rec.id ? 'wait' : 'pointer',
-                          fontSize: '0.78rem',
-                          fontWeight: 600,
-                          background: rec.nota_fiscal_emitida ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.1)',
-                          borderColor: rec.nota_fiscal_emitida ? 'rgba(34,197,94,0.4)' : 'rgba(239,68,68,0.3)',
-                          color: rec.nota_fiscal_emitida ? '#22c55e' : '#ef4444',
-                          transition: 'all 0.2s',
-                        }}
-                      >
-                        {toggling === rec.id ? '...' : rec.nota_fiscal_emitida ? '✅ Emitida' : '❌ Não emitida'}
-                      </button>
-                    </td>
-                    <td style={{ padding: '10px 12px', color: 'var(--color-muted)', fontSize: '0.78rem' }}>
-                      {rec.numero_nf || (rec.nota_fiscal_emitida ? '—' : '')}
-                      {rec.data_emissao_nf && (
-                        <div style={{ fontSize: '0.7rem', color: 'var(--color-muted)' }}>
-                          {formatDateBR(rec.data_emissao_nf)}
+
+                    {/* Nº NF */}
+                    <td style={{ fontSize: '0.8rem', color: 'var(--color-muted)' }}>
+                      {cr?.numero_nf ? (
+                        <span style={{ fontWeight: 600, color: 'var(--color-text)' }}>{cr.numero_nf}</span>
+                      ) : nf ? (
+                        <button onClick={() => openEditNF(row)}
+                          style={{ padding: '2px 8px', borderRadius: 4, border: '1px dashed var(--color-surface-border)', background: 'transparent', cursor: 'pointer', fontSize: '0.75rem', color: 'var(--color-muted)' }}
+                        >+ Nº</button>
+                      ) : '—'}
+                      {cr?.data_emissao_nf && (
+                        <div style={{ fontSize: '0.72rem', color: 'var(--color-muted)', marginTop: 2 }}>
+                          {fmtDate(cr.data_emissao_nf)}
                         </div>
                       )}
                     </td>
-                    <td style={{ padding: '6px 8px', whiteSpace: 'nowrap' }}>
-                      {/* Mark as paid button */}
-                      {Number(rec.valor_a_pagar || 0) > 0 && (
-                        confirmMarkPago === rec.id ? (
-                          <div style={{ display: 'flex', gap: 4, alignItems: 'center', marginBottom: 4 }}>
-                            <span style={{ fontSize: '0.72rem', color: '#22c55e', whiteSpace: 'nowrap' }}>Marcar como pago?</span>
-                            <button
-                              onClick={() => handleMarkAsPago(rec)}
-                              disabled={markingPago === rec.id}
-                              style={{ padding: '2px 8px', borderRadius: 4, border: 'none', background: '#22c55e', color: '#fff', cursor: 'pointer', fontSize: '0.72rem', fontWeight: 700 }}
-                            >
-                              {markingPago === rec.id ? '...' : 'Confirmar'}
-                            </button>
-                            <button
-                              onClick={() => setConfirmMarkPago(null)}
-                              style={{ padding: '2px 6px', borderRadius: 4, border: '1px solid var(--color-surface-border)', background: 'transparent', color: 'var(--color-text-secondary)', cursor: 'pointer', fontSize: '0.72rem' }}
-                            >
-                              Não
-                            </button>
-                          </div>
-                        ) : (
+
+                    {/* Ações */}
+                    <td style={{ whiteSpace: 'nowrap' }}>
+                      {isConfirmDel ? (
+                        <div style={{ display: 'flex', gap: 4 }}>
                           <button
-                            onClick={() => setConfirmMarkPago(rec.id)}
-                            title="Marcar como pago (quitar)"
-                            style={{ padding: '3px 10px', borderRadius: 4, border: '1px solid rgba(34,197,94,0.4)', background: 'rgba(34,197,94,0.08)', color: '#22c55e', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 600, display: 'block', marginBottom: 4, whiteSpace: 'nowrap' }}
-                          >
-                            ✅ Marcar pago
-                          </button>
-                        )
-                      )}
-                      {/* Delete button */}
-                      {confirmDelRec === rec.id ? (
-                        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                          <span style={{ fontSize: '0.75rem', color: '#ef4444', whiteSpace: 'nowrap' }}>Excluir?</span>
-                          <button
-                            onClick={() => handleDeleteRec(rec.id)}
+                            onClick={() => handleDelete(row)}
                             disabled={deleting}
-                            style={{ padding: '2px 8px', borderRadius: 4, border: 'none', background: '#ef4444', color: '#fff', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 700 }}
-                          >
-                            {deleting ? '...' : 'Sim'}
-                          </button>
+                            style={{ padding: '3px 8px', borderRadius: 4, border: 'none', background: '#ef4444', color: '#fff', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 700 }}
+                          >{deleting ? '...' : 'Confirmar'}</button>
                           <button
-                            onClick={() => setConfirmDelRec(null)}
-                            style={{ padding: '2px 8px', borderRadius: 4, border: '1px solid var(--color-surface-border)', background: 'transparent', color: 'var(--color-text-secondary)', cursor: 'pointer', fontSize: '0.75rem' }}
-                          >
-                            Não
-                          </button>
+                            onClick={() => setConfirmDel(null)}
+                            style={{ padding: '3px 8px', borderRadius: 4, border: '1px solid var(--color-surface-border)', background: 'transparent', cursor: 'pointer', fontSize: '0.75rem' }}
+                          >✕</button>
                         </div>
                       ) : (
                         <button
-                          onClick={() => setConfirmDelRec(rec.id)}
-                          style={{ padding: '3px 8px', borderRadius: 4, border: '1px solid rgba(239,68,68,0.3)', background: 'transparent', color: '#ef4444', cursor: 'pointer', fontSize: '0.78rem' }}
-                          title="Excluir registro financeiro"
-                        >
-                          🗑️
-                        </button>
+                          onClick={() => setConfirmDel(row.id)}
+                          style={{ padding: '3px 8px', borderRadius: 4, border: 'none', background: 'none', cursor: 'pointer', color: '#ef4444', fontSize: '1rem' }}
+                          title="Excluir registro"
+                        >🗑️</button>
                       )}
                     </td>
                   </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
 
-                  {/* Inline NF form */}
-                  {editingNF === rec.id && (
-                    <tr>
-                      <td colSpan={8} style={{ padding: '0 12px 12px 12px' }}>
-                        <div style={{
-                          background: 'rgba(247,148,29,0.08)',
-                          border: '1px solid rgba(247,148,29,0.3)',
-                          borderRadius: 8, padding: '16px',
-                          display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap',
-                        }}>
-                          <div>
-                            <div style={{ fontSize: '0.75rem', color: 'var(--color-muted)', marginBottom: 6 }}>Nº da Nota Fiscal</div>
-                            <input
-                              type="text"
-                              className="field-input"
-                              style={{ width: 160 }}
-                              placeholder="Ex: 001234"
-                              value={nfForm.numero_nf}
-                              onChange={e => setNfForm(f => ({ ...f, numero_nf: e.target.value }))}
-                            />
-                          </div>
-                          <div>
-                            <div style={{ fontSize: '0.75rem', color: 'var(--color-muted)', marginBottom: 6 }}>Data de emissão</div>
-                            <input
-                              type="date"
-                              className="field-input"
-                              style={{ width: 160 }}
-                              value={nfForm.data_emissao_nf}
-                              onChange={e => setNfForm(f => ({ ...f, data_emissao_nf: e.target.value }))}
-                            />
-                          </div>
-                          <button className="btn btn-primary" disabled={toggling === rec.id} onClick={() => handleSaveNF(rec.id)} style={{ padding: '8px 20px' }}>
-                            {toggling === rec.id ? 'Salvando...' : '✅ Marcar como emitida'}
-                          </button>
-                          <button className="btn btn-ghost" onClick={() => setEditingNF(null)} style={{ padding: '8px 16px' }}>
-                            Cancelar
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </React.Fragment>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      {/* ── Zerar confirmation modal ───────────────────────────────────────── */}
+      {confirmZerar && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 3000, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+          <div style={{ background: 'var(--color-surface)', border: '1px solid rgba(239,68,68,0.4)', borderRadius: 16, padding: 32, maxWidth: 440, width: '100%' }}>
+            <div style={{ fontSize: '2.5rem', textAlign: 'center', marginBottom: 12 }}>🗑️</div>
+            <div style={{ fontWeight: 700, fontSize: '1.05rem', textAlign: 'center', marginBottom: 8 }}>Zerar todo o painel financeiro?</div>
+            <div style={{ fontSize: '0.875rem', color: 'var(--color-text-secondary)', textAlign: 'center', marginBottom: 24, lineHeight: 1.7 }}>
+              Apaga <strong>todos os {rows.length} registros</strong> financeiros e seus formulários importados.<br />
+              <strong style={{ color: '#ef4444' }}>Ação irreversível.</strong>
+            </div>
+            <div style={{ display: 'flex', gap: 12 }}>
+              <button
+                onClick={() => setConfirmZerar(false)}
+                disabled={zerando}
+                style={{ flex: 1, padding: '12px', borderRadius: 8, border: '1px solid var(--color-surface-border)', background: 'transparent', cursor: 'pointer', fontWeight: 600 }}
+              >Cancelar</button>
+              <button
+                onClick={handleZerar}
+                disabled={zerando}
+                style={{ flex: 1, padding: '12px', borderRadius: 8, border: 'none', background: zerando ? '#888' : '#ef4444', color: '#fff', cursor: zerando ? 'wait' : 'pointer', fontWeight: 700 }}
+              >{zerando ? '⏳ Apagando...' : '🗑️ Sim, zerar tudo'}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
