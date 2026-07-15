@@ -6,6 +6,7 @@ export interface ImportResult {
   imported: number;
   duplicates: number;
   errors: { row: number; message: string }[];
+  recebimento_errors: number; // inserts que falharam em controle_recebimentos
 }
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -120,7 +121,7 @@ function buildSafeRecord(full: ReturnType<typeof buildFormRecord>) {
 export async function importHistoricalRows(
   rows: ParsedHistoricalRow[]
 ): Promise<ImportResult> {
-  const result: ImportResult = { imported: 0, duplicates: 0, errors: [] };
+  const result: ImportResult = { imported: 0, duplicates: 0, errors: [], recebimento_errors: 0 };
 
   for (const row of rows) {
     try {
@@ -213,6 +214,7 @@ export async function importHistoricalRows(
 
       if (recError) {
         console.warn('[importService] recebimento error:', recError.message);
+        result.recebimento_errors++;
       }
 
       result.imported++;

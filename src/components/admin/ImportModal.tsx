@@ -50,6 +50,7 @@ export function ImportModal({ onClose, onSuccess }: ImportModalProps) {
     const totalBatches = Math.ceil(rows.length / batchSize);
     let allImported = 0;
     let allDuplicates = 0;
+    let allRecebimentoErrors = 0;
     const allErrors: ImportResult['errors'] = [];
 
     for (let i = 0; i < totalBatches; i++) {
@@ -57,11 +58,12 @@ export function ImportModal({ onClose, onSuccess }: ImportModalProps) {
       const res = await importHistoricalRows(batch);
       allImported += res.imported;
       allDuplicates += res.duplicates;
+      allRecebimentoErrors += res.recebimento_errors || 0;
       allErrors.push(...res.errors);
       setProgress(Math.round(((i + 1) / totalBatches) * 100));
     }
 
-    setImportResult({ imported: allImported, duplicates: allDuplicates, errors: allErrors });
+    setImportResult({ imported: allImported, duplicates: allDuplicates, errors: allErrors, recebimento_errors: allRecebimentoErrors });
     setStep('done');
     if (allImported > 0) onSuccess();
   };
@@ -343,18 +345,33 @@ export function ImportModal({ onClose, onSuccess }: ImportModalProps) {
               ))}
             </div>
 
-            {importResult.errors.length > 0 && (
+            {/* RLS warning: controle_recebimentos insert failed */}
+            {(importResult.recebimento_errors || 0) > 0 && (
               <div style={{
-                background: 'rgba(220,38,38,0.08)',
-                border: '1px solid rgba(220,38,38,0.2)',
-                borderRadius: 8, padding: 12, marginBottom: 16,
-                maxHeight: 120, overflowY: 'auto', fontSize: '0.8rem'
+                background: 'rgba(245,158,11,0.1)',
+                border: '1px solid rgba(245,158,11,0.4)',
+                borderRadius: 8, padding: '14px 16px', marginBottom: 16,
+                fontSize: '0.82rem', color: '#f59e0b',
               }}>
-                {importResult.errors.map((e, i) => (
-                  <div key={i} style={{ color: '#ef4444', marginBottom: 4 }}>
-                    Linha {e.row}: {e.message}
-                  </div>
-                ))}
+                <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                  ⚠️ {importResult.recebimento_errors} registro(s) importados mas sem dados financeiros
+                </div>
+                <div style={{ color: 'var(--color-text-secondary)', lineHeight: 1.6 }}>
+                  Os formulários foram salvos, mas os valores de PAGO e FALTA PAGAR não puderam ser gravados
+                  (erro de permissão no banco de dados — política RLS).<br />
+                  <strong>Para corrigir:</strong> Execute o SQL abaixo no <strong>Dashboard do Supabase → SQL Editor</strong>
+                  e depois reimporte a planilha:
+                </div>
+                <pre style={{
+                  background: 'rgba(0,0,0,0.3)', borderRadius: 6, padding: '10px 12px',
+                  marginTop: 10, fontSize: '0.75rem', overflowX: 'auto',
+                  color: '#fbbf24', whiteSpace: 'pre-wrap',
+                }}>
+{`drop policy if exists "admin_tudo_recebimentos" on controle_recebimentos;
+create policy "authenticated_tudo_recebimentos"
+  on controle_recebimentos for all to authenticated
+  using (true) with check (true);`}
+                </pre>
               </div>
             )}
 
