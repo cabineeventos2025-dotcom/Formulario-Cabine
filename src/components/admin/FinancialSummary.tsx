@@ -52,6 +52,11 @@ export function FinancialSummary() {
   const [confirmMarkPago, setConfirmMarkPago] = useState<string | null>(null);
   const [pagoFilter, setPagoFilter] = useState<'all' | 'a_receber' | 'quitado'>('all');
 
+  // Zerar painel
+  const [showZerarConfirm, setShowZerarConfirm] = useState(false);
+  const [zerando, setZerando] = useState(false);
+  const [zerarMsg, setZerarMsg] = useState('');
+
   // Date / period filter
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo,   setDateTo]   = useState('');
@@ -145,6 +150,59 @@ export function FinancialSummary() {
       await load();
     } finally {
       setMarkingPago(null);
+    }
+  };
+
+  const handleZerarPainel = async () => {
+    setZerando(true);
+    setZerarMsg('');
+    try {
+      // 1. Busca todos os IDs de recebimentos
+      const { data: recs, error: recErr } = await supabase
+        .from('controle_recebimentos')
+        .select('id, formulario_evento_id');
+
+      if (recErr) throw new Error(recErr.message);
+
+      if (!recs || recs.length === 0) {
+        setZerarMsg('Painel já está vazio.');
+        setShowZerarConfirm(false);
+        return;
+      }
+
+      // 2. Deleta todos os controle_recebimentos
+      const { error: delRecErr } = await supabase
+        .from('controle_recebimentos')
+        .delete()
+        .neq('id', '00000000-0000-0000-0000-000000000000'); // delete all
+
+      if (delRecErr) throw new Error(`Erro ao excluir recebimentos: ${delRecErr.message}`);
+
+      // 3. Deleta os formulários que vieram de importação
+      const importedIds = recs
+        .map(r => r.formulario_evento_id)
+        .filter(Boolean);
+
+      if (importedIds.length > 0) {
+        // Só deleta os importados (is_imported = true) para não perder formulários reais do site
+        const { error: delFormErr } = await supabase
+          .from('formularios_eventos')
+          .delete()
+          .in('id', importedIds)
+          .eq('is_imported', true);
+
+        if (delFormErr) {
+          console.warn('[zerarPainel] Aviso ao excluir formulários importados:', delFormErr.message);
+        }
+      }
+
+      setShowZerarConfirm(false);
+      setZerarMsg(`✅ Painel zerado com sucesso! ${recs.length} registro(s) removido(s).`);
+      await load();
+    } catch (err: any) {
+      setZerarMsg(`❌ Erro: ${err.message}`);
+    } finally {
+      setZerando(false);
     }
   };
 
@@ -270,8 +328,106 @@ export function FinancialSummary() {
 
   return (
     <div>
-      <div className="admin-page-title">Painel Financeiro</div>
-      <div className="admin-page-subtitle">Subtotais de recebimentos com controle de Nota Fiscal.</div>
+      {/* Header row with title + Zerar button */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+        <div>
+          <div className="admin-page-title">Painel Financeiro</div>
+          <div className="admin-page-subtitle">Subtotais de recebimentos com controle de Nota Fiscal.</div>
+        </div>
+        <button
+          onClick={() => { setShowZerarConfirm(true); setZerarMsg(''); }}
+          style={{
+            padding: '8px 16px',
+            borderRadius: 8,
+            border: '1px solid rgba(239,68,68,0.4)',
+            background: 'rgba(239,68,68,0.06)',
+            color: '#ef4444',
+            cursor: 'pointer',
+            fontSize: '0.82rem',
+            fontWeight: 600,
+            whiteSpace: 'nowrap',
+            transition: 'all 0.2s',
+          }}
+          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.15)'; }}
+          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.06)'; }}
+          title="Apagar todos os registros financeiros e importados"
+        >
+          🗑️ Zerar painel
+        </button>
+      </div>
+
+      {/* Zerar confirmation modal */}
+      {showZerarConfirm && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 2000,
+          background: 'rgba(0,0,0,0.7)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: 16,
+        }}
+          onClick={e => { if (e.target === e.currentTarget && !zerando) setShowZerarConfirm(false); }}
+        >
+          <div style={{
+            background: 'var(--color-surface)',
+            border: '1px solid rgba(239,68,68,0.4)',
+            borderRadius: 16,
+            padding: 32,
+            maxWidth: 440,
+            width: '100%',
+          }}>
+            <div style={{ fontSize: '2.5rem', textAlign: 'center', marginBottom: 12 }}>🗑️</div>
+            <div style={{ fontWeight: 700, fontSize: '1.1rem', color: 'var(--color-text)', textAlign: 'center', marginBottom: 8 }}>
+              Zerar todo o painel financeiro?
+            </div>
+            <div style={{ fontSize: '0.88rem', color: 'var(--color-text-secondary)', textAlign: 'center', marginBottom: 24, lineHeight: 1.6 }}>
+              Esta ação irá excluir <strong>todos os {recebimentos.length} registros financeiros</strong> e os
+              formulários importados do Excel vinculados a eles.<br />
+              <strong style={{ color: '#ef4444' }}>Esta ação não pode ser desfeita.</strong>
+            </div>
+            <div style={{ display: 'flex', gap: 12 }}>
+              <button
+                onClick={() => setShowZerarConfirm(false)}
+                disabled={zerando}
+                style={{
+                  flex: 1, padding: '10px 16px', borderRadius: 8,
+                  border: '1px solid var(--color-surface-border)',
+                  background: 'transparent', color: 'var(--color-text-secondary)',
+                  cursor: 'pointer', fontWeight: 600, fontSize: '0.875rem',
+                }}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleZerarPainel}
+                disabled={zerando}
+                style={{
+                  flex: 1, padding: '10px 16px', borderRadius: 8,
+                  border: 'none',
+                  background: zerando ? '#999' : '#ef4444',
+                  color: '#fff', cursor: zerando ? 'wait' : 'pointer',
+                  fontWeight: 700, fontSize: '0.875rem',
+                  transition: 'background 0.2s',
+                }}
+              >
+                {zerando ? '⏳ Apagando...' : '🗑️ Sim, zerar tudo'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Feedback message */}
+      {zerarMsg && (
+        <div style={{
+          padding: '10px 16px', borderRadius: 8, marginBottom: 16,
+          background: zerarMsg.startsWith('✅') ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
+          color: zerarMsg.startsWith('✅') ? '#22c55e' : '#ef4444',
+          fontSize: '0.875rem', fontWeight: 600,
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        }}>
+          <span>{zerarMsg}</span>
+          <button onClick={() => setZerarMsg('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontSize: '1rem' }}>✕</button>
+        </div>
+      )}
 
       {/* Big summary cards */}
       <div className="stats-grid" style={{ marginBottom: 32 }}>
