@@ -198,22 +198,21 @@ export async function importHistoricalRows(
       }
 
       // ── Create controle_recebimentos ──────────────────────────
+      // Always create, even if valor=0 (financial values may be absent in sheet)
       const valorTotal = (row.valor_pago || 0) + (row.valor_a_pagar || 0);
-      if (valorTotal > 0) {
-        const { error: recError } = await supabase
-          .from('controle_recebimentos')
-          .insert({
-            formulario_evento_id: inserted.id,
-            valor_total_contrato: valorTotal,
-            valor_pago: row.valor_pago || 0,
-            valor_a_pagar: row.valor_a_pagar || 0,
-            // PJ: NF marcada como emitida por padrao (pode ser alterado manualmente no painel)
-            nota_fiscal_emitida: row.tipo_pessoa === 'PJ',
-          });
+      const { error: recError } = await supabase
+        .from('controle_recebimentos')
+        .insert({
+          formulario_evento_id: inserted.id,
+          valor_total_contrato: valorTotal,
+          valor_pago: row.valor_pago || 0,
+          valor_a_pagar: row.valor_a_pagar || 0,
+          // PJ: NF marcada como emitida por padrao (pode ser alterado manualmente no painel)
+          nota_fiscal_emitida: row.tipo_pessoa === 'PJ',
+        });
 
-        if (recError) {
-          console.warn('[importService] recebimento error:', recError.message);
-        }
+      if (recError) {
+        console.warn('[importService] recebimento error:', recError.message);
       }
 
       result.imported++;
@@ -288,4 +287,46 @@ export async function toggleNotaFiscal(
     .eq('id', recebimentoId);
 
   if (error) throw error;
+}
+
+/**
+ * Sync: cria controle_recebimentos para formulários importados que ainda não têm registro financeiro.
+ * Útil quando a importação foi feita antes desta correção ou sem colunas financeiras.
+ */
+export async function syncImportadosSemFinanceiro(): Promise<{ created: number; errors: string[] }> {
+  // 1. Busca todos os formulários importados
+  const { data: forms, error: formErr } = await supabase
+    .from('formularios_eventos')
+    .select('id, tipo_pessoa')
+    .eq('is_imported', true);
+
+  if (formErr) throw new Error(formErr.message);
+  if (!forms || forms.length === 0) return { created: 0, errors: [] };
+
+  // 2. Busca IDs que já têm controle_recebimentos
+  const { data: existing } = await supabase
+    .from('controle_recebimentos')
+    .select('formulario_evento_id')
+    .in('formulario_evento_id', forms.map(f => f.id));
+
+  const existingIds = new Set((existing || []).map((r: any) => r.formulario_evento_id));
+
+  // 3. Cria para os que estão faltando
+  const missing = forms.filter(f => !existingIds.has(f.id));
+  let created = 0;
+  const errors: string[] = [];
+
+  for (const form of missing) {
+    const { error } = await supabase.from('controle_recebimentos').insert({
+      formulario_evento_id: form.id,
+      valor_total_contrato: 0,
+      valor_pago: 0,
+      valor_a_pagar: 0,
+      nota_fiscal_emitida: form.tipo_pessoa === 'PJ',
+    });
+    if (error) errors.push(`${form.id}: ${error.message}`);
+    else created++;
+  }
+
+  return { created, errors };
 }

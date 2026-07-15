@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { loadFinancialSummary, toggleNotaFiscal, type FinancialSummaryRow } from '../../services/importService';
+import { loadFinancialSummary, toggleNotaFiscal, syncImportadosSemFinanceiro, type FinancialSummaryRow } from '../../services/importService';
 import { supabase } from '../../lib/supabase';
 import { formatBRL } from '../../utils/formatters';
 
@@ -56,6 +56,10 @@ export function FinancialSummary() {
   const [showZerarConfirm, setShowZerarConfirm] = useState(false);
   const [zerando, setZerando] = useState(false);
   const [zerarMsg, setZerarMsg] = useState('');
+
+  // Sync
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState('');
 
   // Date / period filter
   const [dateFrom, setDateFrom] = useState('');
@@ -206,6 +210,26 @@ export function FinancialSummary() {
     }
   };
 
+  const handleSync = async () => {
+    setSyncing(true);
+    setSyncMsg('');
+    try {
+      const res = await syncImportadosSemFinanceiro();
+      if (res.created === 0 && res.errors.length === 0) {
+        setSyncMsg('✅ Todos os registros já estão sincronizados.');
+      } else if (res.errors.length > 0) {
+        setSyncMsg(`⚠️ ${res.created} criados, ${res.errors.length} erro(s): ${res.errors[0]}`);
+      } else {
+        setSyncMsg(`✅ ${res.created} registro(s) financeiros criados com sucesso!`);
+      }
+      await load();
+    } catch (err: any) {
+      setSyncMsg(`❌ Erro: ${err.message}`);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const handleSort = (field: SortField) => {
     if (sortField === field) {
       setSortDir(d => d === 'asc' ? 'desc' : 'asc');
@@ -334,26 +358,43 @@ export function FinancialSummary() {
           <div className="admin-page-title">Painel Financeiro</div>
           <div className="admin-page-subtitle">Subtotais de recebimentos com controle de Nota Fiscal.</div>
         </div>
-        <button
-          onClick={() => { setShowZerarConfirm(true); setZerarMsg(''); }}
-          style={{
-            padding: '8px 16px',
-            borderRadius: 8,
-            border: '1px solid rgba(239,68,68,0.4)',
-            background: 'rgba(239,68,68,0.06)',
-            color: '#ef4444',
-            cursor: 'pointer',
-            fontSize: '0.82rem',
-            fontWeight: 600,
-            whiteSpace: 'nowrap',
-            transition: 'all 0.2s',
-          }}
-          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.15)'; }}
-          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.06)'; }}
-          title="Apagar todos os registros financeiros e importados"
-        >
-          🗑️ Zerar painel
-        </button>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          {/* Sync button */}
+          <button
+            onClick={handleSync}
+            disabled={syncing}
+            style={{
+              padding: '8px 16px', borderRadius: 8,
+              border: '1px solid rgba(34,197,94,0.4)',
+              background: 'rgba(34,197,94,0.06)',
+              color: '#22c55e', cursor: syncing ? 'wait' : 'pointer',
+              fontSize: '0.82rem', fontWeight: 600, whiteSpace: 'nowrap',
+              transition: 'all 0.2s',
+            }}
+            onMouseEnter={e => { if (!syncing) (e.currentTarget as HTMLButtonElement).style.background = 'rgba(34,197,94,0.15)'; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(34,197,94,0.06)'; }}
+            title="Cria registros financeiros para importações que ainda não aparecem no financeiro"
+          >
+            {syncing ? '⏳ Sincronizando...' : '🔄 Sincronizar financeiro'}
+          </button>
+          {/* Zerar button */}
+          <button
+            onClick={() => { setShowZerarConfirm(true); setZerarMsg(''); }}
+            style={{
+              padding: '8px 16px', borderRadius: 8,
+              border: '1px solid rgba(239,68,68,0.4)',
+              background: 'rgba(239,68,68,0.06)',
+              color: '#ef4444', cursor: 'pointer',
+              fontSize: '0.82rem', fontWeight: 600, whiteSpace: 'nowrap',
+              transition: 'all 0.2s',
+            }}
+            onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.15)'; }}
+            onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(239,68,68,0.06)'; }}
+            title="Apagar todos os registros financeiros e importados"
+          >
+            🗑️ Zerar painel
+          </button>
+        </div>
       </div>
 
       {/* Zerar confirmation modal */}
@@ -415,17 +456,17 @@ export function FinancialSummary() {
         </div>
       )}
 
-      {/* Feedback message */}
-      {zerarMsg && (
+      {/* Feedback messages */}
+      {(zerarMsg || syncMsg) && (
         <div style={{
           padding: '10px 16px', borderRadius: 8, marginBottom: 16,
-          background: zerarMsg.startsWith('✅') ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
-          color: zerarMsg.startsWith('✅') ? '#22c55e' : '#ef4444',
+          background: (zerarMsg || syncMsg).startsWith('✅') ? 'rgba(34,197,94,0.1)' : 'rgba(239,68,68,0.1)',
+          color: (zerarMsg || syncMsg).startsWith('✅') ? '#22c55e' : '#ef4444',
           fontSize: '0.875rem', fontWeight: 600,
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         }}>
-          <span>{zerarMsg}</span>
-          <button onClick={() => setZerarMsg('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontSize: '1rem' }}>✕</button>
+          <span>{zerarMsg || syncMsg}</span>
+          <button onClick={() => { setZerarMsg(''); setSyncMsg(''); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', fontSize: '1rem' }}>✕</button>
         </div>
       )}
 
