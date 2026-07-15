@@ -35,12 +35,16 @@ interface FormRecord {
   created_at: string;
 }
 
+interface HistoricoRecord extends FormRecord {
+  controle_recebimentos?: { valor_pago: number; valor_a_pagar: number; valor_total_contrato: number }[];
+}
+
 export function Admin() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<AdminTab>('formularios');
   const [user, setUser] = useState<any>(null);
   const [forms, setForms] = useState<FormRecord[]>([]);
-  const [historico, setHistorico] = useState<FormRecord[]>([]);
+  const [historico, setHistorico] = useState<HistoricoRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterTipo, setFilterTipo] = useState('');
@@ -51,6 +55,10 @@ export function Admin() {
   const [historicoSearch, setHistoricoSearch] = useState('');
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  const [confirmZerarHistorico, setConfirmZerarHistorico] = useState(false);
+  const [zerandoHistorico, setZerandoHistorico] = useState(false);
+  const [confirmDeleteHistorico, setConfirmDeleteHistorico] = useState<string | null>(null);
+  const [deletingHistorico, setDeletingHistorico] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -93,11 +101,47 @@ export function Admin() {
   const loadHistorico = async () => {
     const { data } = await supabase
       .from('formularios_eventos')
-      .select('*')
+      .select('*, controle_recebimentos(valor_pago, valor_a_pagar, valor_total_contrato)')
       .eq('is_imported', true)
       .order('data_evento', { ascending: false })
-      .limit(500);
-    setHistorico((data || []) as FormRecord[]);
+      .limit(1000);
+    setHistorico((data || []) as HistoricoRecord[]);
+  };
+
+  const handleZerarHistorico = async () => {
+    setZerandoHistorico(true);
+    try {
+      // Delete all controle_recebimentos linked to imported forms
+      const { data: ids } = await supabase
+        .from('formularios_eventos')
+        .select('id')
+        .eq('is_imported', true);
+      if (ids && ids.length > 0) {
+        await supabase.from('controle_recebimentos')
+          .delete()
+          .in('formulario_evento_id', ids.map((r: any) => r.id));
+      }
+      // Delete all imported forms
+      await supabase.from('formularios_eventos')
+        .delete()
+        .eq('is_imported', true);
+      setHistorico([]);
+      setConfirmZerarHistorico(false);
+    } finally {
+      setZerandoHistorico(false);
+    }
+  };
+
+  const handleDeleteHistoricoRow = async (id: string) => {
+    setDeletingHistorico(true);
+    try {
+      await supabase.from('controle_recebimentos').delete().eq('formulario_evento_id', id);
+      await supabase.from('formularios_eventos').delete().eq('id', id);
+      setConfirmDeleteHistorico(null);
+      setHistorico(prev => prev.filter(r => r.id !== id));
+    } finally {
+      setDeletingHistorico(false);
+    }
   };
 
   const handleLogout = async () => {
@@ -351,10 +395,65 @@ export function Admin() {
         {/* ─── HISTÓRICO ─── */}
         {activeTab === 'historico' && (
           <>
-            <div className="admin-page-title">Histórico de Eventos</div>
-            <div className="admin-page-subtitle">
-              Eventos importados da planilha anterior. Não editados via formulário.
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+              <div>
+                <div className="admin-page-title">Histórico de Eventos</div>
+                <div className="admin-page-subtitle">Eventos importados da planilha. {historico.length > 0 && `${historico.length} registro(s).`}</div>
+              </div>
+              {historico.length > 0 && (
+                <button
+                  onClick={() => setConfirmZerarHistorico(true)}
+                  style={{
+                    padding: '8px 14px', borderRadius: 8, border: '1px solid rgba(239,68,68,0.4)',
+                    background: 'rgba(239,68,68,0.06)', color: '#ef4444', cursor: 'pointer',
+                    fontSize: '0.82rem', fontWeight: 600, whiteSpace: 'nowrap',
+                  }}
+                >
+                  🗑️ Zerar histórico
+                </button>
+              )}
             </div>
+
+            {/* Zerar confirmation modal */}
+            {confirmZerarHistorico && (
+              <div style={{ position: 'fixed', inset: 0, zIndex: 2000, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
+                onClick={e => { if (e.target === e.currentTarget && !zerandoHistorico) setConfirmZerarHistorico(false); }}
+              >
+                <div style={{ background: 'var(--color-surface)', border: '1px solid rgba(239,68,68,0.4)', borderRadius: 16, padding: 32, maxWidth: 420, width: '100%' }}>
+                  <div style={{ fontSize: '2.5rem', textAlign: 'center', marginBottom: 12 }}>🗑️</div>
+                  <div style={{ fontWeight: 700, fontSize: '1.05rem', textAlign: 'center', marginBottom: 8 }}>Zerar todo o histórico?</div>
+                  <div style={{ fontSize: '0.87rem', color: 'var(--color-text-secondary)', textAlign: 'center', marginBottom: 20, lineHeight: 1.6 }}>
+                    Remove <strong>todos os {historico.length} registros</strong> importados e seus dados financeiros.<br />
+                    <strong style={{ color: '#ef4444' }}>Ação irreversível.</strong>
+                  </div>
+                  <div style={{ display: 'flex', gap: 12 }}>
+                    <button onClick={() => setConfirmZerarHistorico(false)} disabled={zerandoHistorico}
+                      style={{ flex: 1, padding: '10px 16px', borderRadius: 8, border: '1px solid var(--color-surface-border)', background: 'transparent', color: 'var(--color-text-secondary)', cursor: 'pointer', fontWeight: 600, fontSize: '0.875rem' }}
+                    >Cancelar</button>
+                    <button onClick={handleZerarHistorico} disabled={zerandoHistorico}
+                      style={{ flex: 1, padding: '10px 16px', borderRadius: 8, border: 'none', background: zerandoHistorico ? '#999' : '#ef4444', color: '#fff', cursor: zerandoHistorico ? 'wait' : 'pointer', fontWeight: 700, fontSize: '0.875rem' }}
+                    >{zerandoHistorico ? '⏳ Apagando...' : '🗑️ Sim, zerar tudo'}</button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Individual delete confirmation */}
+            {confirmDeleteHistorico && (
+              <div style={{ position: 'fixed', inset: 0, zIndex: 2000, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+                <div style={{ background: 'var(--color-surface)', borderRadius: 12, padding: 24, maxWidth: 340, width: '100%', textAlign: 'center' }}>
+                  <div style={{ fontWeight: 700, marginBottom: 12 }}>Excluir este registro?</div>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)', marginBottom: 20 }}>O registro e seus dados financeiros serão removidos.</div>
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <button onClick={() => setConfirmDeleteHistorico(null)} style={{ flex: 1, padding: '8px', borderRadius: 8, border: '1px solid var(--color-surface-border)', background: 'transparent', cursor: 'pointer' }}>Cancelar</button>
+                    <button onClick={() => handleDeleteHistoricoRow(confirmDeleteHistorico!)} disabled={deletingHistorico}
+                      style={{ flex: 1, padding: '8px', borderRadius: 8, border: 'none', background: '#ef4444', color: '#fff', cursor: 'pointer', fontWeight: 700 }}
+                    >{deletingHistorico ? '...' : 'Excluir'}</button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div className="admin-search">
               <input
@@ -365,16 +464,10 @@ export function Admin() {
                 value={historicoSearch}
                 onChange={e => setHistoricoSearch(e.target.value)}
               />
-              <button
-                className="btn btn-primary"
-                id="btn-import-xlsx"
-                onClick={() => setShowImportModal(true)}
-              >
+              <button className="btn btn-primary" id="btn-import-xlsx" onClick={() => setShowImportModal(true)}>
                 📅 Importar planilha (.xlsx)
               </button>
-              <button className="btn btn-ghost" onClick={loadHistorico} id="btn-refresh-historico">
-                🔄
-              </button>
+              <button className="btn btn-ghost" onClick={loadHistorico} id="btn-refresh-historico">🔄</button>
             </div>
 
             <div className="admin-table-wrapper">
@@ -388,38 +481,51 @@ export function Admin() {
                     <th>Pacote</th>
                     <th>Equipamento</th>
                     <th>Forma Pgto</th>
+                    <th style={{ color: '#22c55e' }}>Pago</th>
+                    <th style={{ color: '#ef4444' }}>Falta</th>
+                    <th></th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredHistorico.length === 0 ? (
                     <tr>
-                      <td colSpan={7} style={{ textAlign: 'center', color: 'var(--color-muted)', padding: 40 }}>
+                      <td colSpan={10} style={{ textAlign: 'center', color: 'var(--color-muted)', padding: 40 }}>
                         {historico.length === 0
                           ? 'Nenhum histórico importado ainda. Clique em "Importar planilha" para começar.'
                           : 'Nenhum registro encontrado com esse filtro.'}
                       </td>
                     </tr>
-                  ) : filteredHistorico.map(f => (
-                    <tr key={f.id}>
-                      <td>
-                        <span className={`badge badge-${f.tipo_pessoa?.toLowerCase()}`}>
-                          {f.tipo_pessoa}
-                        </span>
-                      </td>
-                      <td style={{ maxWidth: 200, fontWeight: 500 }}>
-                        {f.tipo_pessoa === 'PF' ? f.nome_contratante : (f.nome_fantasia || f.nome_responsavel)}
-                      </td>
-                      <td style={{ fontFamily: 'monospace', fontSize: '0.8rem', color: 'var(--color-muted)' }}>
-                        {f.cpf ? formatCPFDisplay(f.cpf) : f.cnpj ? formatCNPJDisplay(f.cnpj) : '—'}
-                      </td>
-                      <td>{formatDate(f.data_evento)}</td>
-                      <td style={{ fontSize: '0.8rem' }}>{f.pacote_nome_snapshot || '—'}</td>
-                      <td style={{ fontSize: '0.8rem' }}>{f.equipamento_nome_snapshot || '—'}</td>
-                      <td style={{ fontSize: '0.8rem', color: 'var(--color-muted)' }}>
-                        {f.forma_pagamento || '—'}
-                      </td>
-                    </tr>
-                  ))}
+                  ) : filteredHistorico.map(f => {
+                    const rec = f.controle_recebimentos?.[0];
+                    return (
+                      <tr key={f.id}>
+                        <td><span className={`badge badge-${f.tipo_pessoa?.toLowerCase()}`}>{f.tipo_pessoa}</span></td>
+                        <td style={{ maxWidth: 200, fontWeight: 500 }}>
+                          {f.tipo_pessoa === 'PF' ? f.nome_contratante : (f.nome_fantasia || f.nome_responsavel)}
+                        </td>
+                        <td style={{ fontFamily: 'monospace', fontSize: '0.8rem', color: 'var(--color-muted)' }}>
+                          {(f as any).cpf ? formatCPFDisplay((f as any).cpf) : (f as any).cnpj ? formatCNPJDisplay((f as any).cnpj) : '—'}
+                        </td>
+                        <td>{formatDate(f.data_evento)}</td>
+                        <td style={{ fontSize: '0.8rem' }}>{f.pacote_nome_snapshot || '—'}</td>
+                        <td style={{ fontSize: '0.8rem' }}>{f.equipamento_nome_snapshot || '—'}</td>
+                        <td style={{ fontSize: '0.8rem', color: 'var(--color-muted)' }}>{f.forma_pagamento || '—'}</td>
+                        <td style={{ fontSize: '0.82rem', fontWeight: 600, color: '#22c55e' }}>
+                          {rec ? formatBRL(rec.valor_pago) : '—'}
+                        </td>
+                        <td style={{ fontSize: '0.82rem', fontWeight: 600, color: (rec?.valor_a_pagar ?? 0) > 0 ? '#ef4444' : 'var(--color-muted)' }}>
+                          {rec ? formatBRL(rec.valor_a_pagar) : '—'}
+                        </td>
+                        <td>
+                          <button
+                            onClick={() => setConfirmDeleteHistorico(f.id)}
+                            style={{ padding: '3px 8px', background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444', fontSize: '1rem' }}
+                            title="Excluir registro"
+                          >🗑️</button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

@@ -209,11 +209,12 @@ function parseDate(raw: unknown): string | null {
   // Excel serial date number (e.g. 46032 = 2026-01-10)
   if (typeof raw === 'number') {
     if (raw < 1) return null; // time fraction only, no date
-    // Excel has a leap-year bug: incorrectly treats 1900 as leap year,
-    // so any serial >= 60 must subtract 1 to get the correct day.
-    const adjusted = raw >= 60 ? raw - 1 : raw;
-    // Convert to UTC ms. We use UTC explicitly so toISOString is stable.
-    const utcMs = (adjusted - 25569) * 86400 * 1000;
+    // Convert Excel serial to UTC ms.
+    // Note: 25569 = days from Excel epoch (Dec 30 1899) to Unix epoch (Jan 1 1970).
+    // The Excel 1900 leap-year bug (serial 60 = fake Feb 29 1900) is already absorbed
+    // into the offset constant 25569 — do NOT apply an extra -1 adjustment here,
+    // as that incorrectly shifts all modern dates back by 1 day.
+    const utcMs = (raw - 25569) * 86400 * 1000;
     const d = new Date(utcMs);
     if (isNaN(d.getTime())) return null;
     // Build YYYY-MM-DD from UTC components to avoid local-timezone shift
