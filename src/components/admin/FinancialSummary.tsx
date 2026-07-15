@@ -142,9 +142,8 @@ export function FinancialSummary() {
             valor_pago, valor_a_pagar, valor_total_contrato
           )
         `)
-        .eq('is_imported', true)
         .order('data_evento', { ascending: false })
-        .limit(2000);
+        .limit(5000);
 
       if (error) { setLoadErr(error.message); return; }
       setRows((data || []) as unknown as FinRow[]);
@@ -207,6 +206,26 @@ export function FinancialSummary() {
 
   const comNFRows = rows.filter(nfEmitida);
   const semNFRows = rows.filter(r => !nfEmitida(r));
+
+  // ── MEI Limit tracker (always uses current year, all records, NF emitida) ──
+
+  const MEI_LIMITE = 81000;
+  const currentYear = new Date().getFullYear().toString();
+
+  const meiTotal = useMemo(() => {
+    // Sum total contracts where NF emitida = true AND data_evento is current year
+    return rows
+      .filter(r => {
+        if (!nfEmitida(r)) return false;
+        const key = dateKey(r.data_evento); // 'YYYYMMDD'
+        return key.startsWith(currentYear);
+      })
+      .reduce((s, r) => s + getValores(r).total, 0);
+  }, [rows, currentYear]);
+
+  const meiPct  = Math.min((meiTotal / MEI_LIMITE) * 100, 100);
+  const meiLeft = Math.max(MEI_LIMITE - meiTotal, 0);
+  const meiColor = meiPct >= 90 ? '#ef4444' : meiPct >= 70 ? '#f59e0b' : '#22c55e';
 
   // ── Actions ───────────────────────────────────────────────────────────────
 
@@ -470,16 +489,103 @@ export function FinancialSummary() {
           )}
         </div>
 
-        {/* Totals bar */}
+        {/* Totals bar + MEI indicator */}
         {filtered.length > 0 && (
-          <div style={{ marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--color-surface-border)', display: 'flex', gap: 20, flexWrap: 'wrap', fontSize: '0.85rem' }}>
-            <span style={{ color: 'var(--color-muted)' }}>{filtered.length} de {rows.length} registro(s)</span>
-            <span>Pago: <strong style={{ color: '#22c55e' }}>{formatBRL(totalPago)}</strong></span>
-            <span>A receber: <strong style={{ color: '#ef4444' }}>{formatBRL(totalAPagar)}</strong></span>
-            <span>Total: <strong style={{ color: 'var(--color-secondary)' }}>{formatBRL(totalGeral)}</strong></span>
+          <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--color-surface-border)', display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
+            {/* Left: filter totals */}
+            <div style={{ display: 'flex', gap: 18, flexWrap: 'wrap', fontSize: '0.85rem', alignItems: 'center' }}>
+              <span style={{ color: 'var(--color-muted)' }}>{filtered.length} de {rows.length} registro(s)</span>
+              <span>Pago: <strong style={{ color: '#22c55e' }}>{formatBRL(totalPago)}</strong></span>
+              <span>A receber: <strong style={{ color: '#ef4444' }}>{formatBRL(totalAPagar)}</strong></span>
+              <span>Total: <strong style={{ color: 'var(--color-secondary)' }}>{formatBRL(totalGeral)}</strong></span>
+            </div>
           </div>
         )}
       </div>
+
+      {/* ── MEI Limit Indicator ── */}
+      {!loading && rows.length > 0 && (
+        <div style={{
+          background: `linear-gradient(135deg, ${meiColor}11 0%, ${meiColor}06 100%)`,
+          border: `1.5px solid ${meiColor}44`,
+          borderRadius: 14,
+          padding: '20px 28px',
+          marginBottom: 20,
+          display: 'flex',
+          gap: 28,
+          alignItems: 'center',
+          flexWrap: 'wrap',
+        }}>
+          {/* Icon + label */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: '0 0 auto' }}>
+            <div style={{ fontSize: '2rem' }}>
+              {meiPct >= 90 ? '🚨' : meiPct >= 70 ? '⚠️' : '🧾'}
+            </div>
+            <div>
+              <div style={{ fontSize: '0.72rem', color: 'var(--color-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                Limite MEI {currentYear} — NF Emitidas
+              </div>
+              <div style={{ fontSize: '1.75rem', fontWeight: 800, color: meiColor, lineHeight: 1.1 }}>
+                {formatBRL(meiTotal)}
+              </div>
+              <div style={{ fontSize: '0.78rem', color: 'var(--color-muted)', marginTop: 2 }}>
+                de {formatBRL(MEI_LIMITE)} anuais
+              </div>
+            </div>
+          </div>
+
+          {/* Progress bar + info */}
+          <div style={{ flex: '1 1 240px', minWidth: 200 }}>
+            {/* Bar */}
+            <div style={{ height: 14, background: 'var(--color-surface-border)', borderRadius: 999, overflow: 'hidden', marginBottom: 10, position: 'relative' }}>
+              <div style={{
+                width: `${meiPct}%`,
+                height: '100%',
+                background: meiColor,
+                borderRadius: 999,
+                transition: 'width 0.6s ease',
+                boxShadow: `0 0 10px ${meiColor}66`,
+              }} />
+              {/* 70% marker */}
+              <div style={{ position: 'absolute', top: 0, left: '70%', width: 2, height: '100%', background: '#f59e0b44' }} />
+              {/* 90% marker */}
+              <div style={{ position: 'absolute', top: 0, left: '90%', width: 2, height: '100%', background: '#ef444455' }} />
+            </div>
+            {/* Stats row */}
+            <div style={{ display: 'flex', gap: 20, fontSize: '0.82rem', flexWrap: 'wrap' }}>
+              <div>
+                <span style={{ color: 'var(--color-muted)' }}>Utilizado: </span>
+                <strong style={{ color: meiColor }}>{meiPct.toFixed(1)}%</strong>
+              </div>
+              <div>
+                <span style={{ color: 'var(--color-muted)' }}>Disponível: </span>
+                <strong style={{ color: meiLeft > 0 ? '#22c55e' : '#ef4444' }}>{formatBRL(meiLeft)}</strong>
+              </div>
+              <div>
+                <span style={{ color: 'var(--color-muted)' }}>NFs emitidas: </span>
+                <strong>{comNFRows.filter(r => dateKey(r.data_evento).startsWith(currentYear)).length}</strong>
+              </div>
+            </div>
+            {/* Alert */}
+            {meiPct >= 70 && (
+              <div style={{
+                marginTop: 10, padding: '7px 12px', borderRadius: 8,
+                background: meiPct >= 90 ? 'rgba(239,68,68,0.12)' : 'rgba(245,158,11,0.12)',
+                border: `1px solid ${meiColor}44`,
+                fontSize: '0.78rem',
+                color: meiColor,
+                fontWeight: 600,
+              }}>
+                {meiPct >= 100
+                  ? '🚨 Limite MEI atingido! Consulte um contador.'
+                  : meiPct >= 90
+                  ? `🚨 Atenção: restam apenas ${formatBRL(meiLeft)} para o limite MEI!`
+                  : `⚠️ Você já utilizou ${meiPct.toFixed(0)}% do limite anual MEI.`}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ── Table ── */}
       {loading ? (
