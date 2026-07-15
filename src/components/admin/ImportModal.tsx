@@ -223,6 +223,37 @@ export function ImportModal({ onClose, onSuccess }: ImportModalProps) {
               )}
             </div>
 
+            {/* Financial column detection status */}
+            {(() => {
+              const detCols = parseResult.detectedColumns || {};
+              const hasPago = Object.values(detCols).includes('pago');
+              const hasFalta = Object.values(detCols).includes('falta_pagar');
+              const totalPago = parseResult.rows.reduce((s, r) => s + r.valor_pago, 0);
+              const allZero = totalPago === 0 && parseResult.rows.length > 0;
+              return (
+                <div style={{
+                  background: (hasPago && hasFalta) ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)',
+                  border: `1px solid ${(hasPago && hasFalta) ? 'rgba(34,197,94,0.3)' : 'rgba(239,68,68,0.3)'}`,
+                  borderRadius: 8, padding: '12px 16px', marginBottom: 16, fontSize: '0.82rem',
+                }}>
+                  <div style={{ fontWeight: 700, color: 'var(--color-text)', marginBottom: 8 }}>🔍 Colunas financeiras detectadas:</div>
+                  <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: hasPago && hasFalta && !allZero ? 0 : 8 }}>
+                    <span style={{ color: hasPago ? '#22c55e' : '#ef4444' }}>
+                      {hasPago ? '✅' : '❌'} PAGO: {hasPago ? `"${Object.keys(detCols).find(k => detCols[k] === 'pago')}"` : 'não encontrado'}
+                    </span>
+                    <span style={{ color: hasFalta ? '#22c55e' : '#ef4444' }}>
+                      {hasFalta ? '✅' : '❌'} FALTA PAGAR: {hasFalta ? `"${Object.keys(detCols).find(k => detCols[k] === 'falta_pagar')}"` : 'não encontrado'}
+                    </span>
+                  </div>
+                  {(!hasPago || !hasFalta || allZero) && (
+                    <div style={{ color: '#ef4444', fontSize: '0.78rem', marginTop: 4 }}>
+                      ⚠️ {allZero && hasPago ? 'Coluna detectada mas todos os valores são R$0,00 — verifique o formato dos valores na planilha.' : 'Renomeie as colunas na planilha para exatamente "PAGO" e "AINDA FALTA PAGAR" e reimporte.'}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
             {/* Financial totals */}
             <div style={{
               background: 'var(--color-surface-hover)', borderRadius: 10,

@@ -48,36 +48,104 @@ export interface ParseResult {
   errors: { row: number; message: string }[];
   totalRows: number;
   skipped: number;
+  detectedColumns: Record<string, string>; // raw header → internal key, for debugging
 }
 
 // ── Column name mapping (normalized: lowercase + sem acentos) ──
-// A normalizacao permite tolerar variações de acentuação nos cabeçalhos da planilha.
 const COL_MAP_NORMALIZED: Record<string, string> = {
-  'carimbo de data/hora':                           'carimbo',
-  'nome do contratante':                            'nome',
-  'data de nascimento':                             'data_nasc',
-  'cpf':                                            'cpf',
-  'rg':                                             'rg',
-  'seu endereco residencial':                       'endereco',
-  'telefones para contato':                         'telefone',
-  'e-mail':                                         'email',
-  'email':                                          'email',
-  'contato cerimonial / comentarios':               'cerimonial',
-  'nome do evento':                                 'nome_evento',
-  'endereco do evento':                             'endereco_evento',
-  'horario de inicio do evento':                    'horario_evento',
-  'horario de inicio das fotos':                    'horario_fotos',
-  'data do evento':                                 'data_evento',
-  'forma de pagamento desejada':                    'forma_pgto',
-  'quantidade de horas contratada':                 'qtd_horas',
-  'quantidade de horas':                            'qtd_horas',
-  // AUTORIZA — aceita qualquer variação que comece com "autoriza"
-  'autoriza': 'autoriza', // parcial, tratado abaixo
-  'comentarios':                                    'comentarios',
-  'pacote escolhido':                               'pacote',
-  'equipamento escolhido':                          'equipamento',
-  'pago':                                           'pago',
-  'ainda falta pagar':                              'falta_pagar',
+  // Carimbo
+  'carimbo de data/hora': 'carimbo',
+  'carimbo': 'carimbo',
+  'timestamp': 'carimbo',
+  'data hora': 'carimbo',
+  // Nome
+  'nome do contratante': 'nome',
+  'nome contratante': 'nome',
+  'nome': 'nome',
+  'nome completo': 'nome',
+  // Nascimento
+  'data de nascimento': 'data_nasc',
+  'nascimento': 'data_nasc',
+  'data nascimento': 'data_nasc',
+  // Documentos
+  'cpf': 'cpf',
+  'cpf/cnpj': 'cpf',
+  'cnpj': 'cpf',
+  'rg': 'rg',
+  // Endereço
+  'seu endereco residencial': 'endereco',
+  'endereco residencial': 'endereco',
+  'endereco': 'endereco',
+  'residencia': 'endereco',
+  // Telefone
+  'telefones para contato': 'telefone',
+  'telefone': 'telefone',
+  'celular': 'telefone',
+  'whatsapp': 'telefone',
+  // Email
+  'e-mail': 'email',
+  'email': 'email',
+  // Cerimonial
+  'contato cerimonial / comentarios': 'cerimonial',
+  'contato cerimonial': 'cerimonial',
+  'cerimonial': 'cerimonial',
+  // Evento
+  'nome do evento': 'nome_evento',
+  'nome evento': 'nome_evento',
+  'evento': 'nome_evento',
+  'endereco do evento': 'endereco_evento',
+  'local do evento': 'endereco_evento',
+  'local evento': 'endereco_evento',
+  'horario de inicio do evento': 'horario_evento',
+  'horario inicio evento': 'horario_evento',
+  'horario do evento': 'horario_evento',
+  'horario inicio': 'horario_evento',
+  'horario de inicio das fotos': 'horario_fotos',
+  'horario inicio fotos': 'horario_fotos',
+  'horario fotos': 'horario_fotos',
+  'data do evento': 'data_evento',
+  'data evento': 'data_evento',
+  // Pagamento
+  'forma de pagamento desejada': 'forma_pgto',
+  'forma de pagamento': 'forma_pgto',
+  'forma pagamento': 'forma_pgto',
+  'pagamento': 'forma_pgto',
+  // Horas
+  'quantidade de horas contratada': 'qtd_horas',
+  'quantidade de horas': 'qtd_horas',
+  'qtd horas': 'qtd_horas',
+  'horas': 'qtd_horas',
+  // Comentários
+  'comentarios': 'comentarios',
+  'observacoes': 'comentarios',
+  'obs': 'comentarios',
+  // Pacote
+  'pacote escolhido': 'pacote',
+  'pacote': 'pacote',
+  // Equipamento
+  'equipamento escolhido': 'equipamento',
+  'equipamento': 'equipamento',
+  // Financeiro — PAGO (muitas variações possíveis)
+  'pago': 'pago',
+  'valor pago': 'pago',
+  'ja pago': 'pago',
+  'total pago': 'pago',
+  'valor ja pago': 'pago',
+  'recebido': 'pago',
+  'valor recebido': 'pago',
+  'entrada': 'pago',
+  'sinal': 'pago',
+  // Financeiro — FALTA PAGAR (muitas variações possíveis)
+  'ainda falta pagar': 'falta_pagar',
+  'falta pagar': 'falta_pagar',
+  'valor a pagar': 'falta_pagar',
+  'a pagar': 'falta_pagar',
+  'restante': 'falta_pagar',
+  'saldo': 'falta_pagar',
+  'falta': 'falta_pagar',
+  'pendente': 'falta_pagar',
+  'valor pendente': 'falta_pagar',
+  'valor restante': 'falta_pagar',
 };
 
 /** Remove acentos e converte para minúsculo para comparação tolerante */
@@ -92,9 +160,13 @@ function normalizeHeader(h: string): string {
 
 function resolveColKey(raw: string): string | undefined {
   const norm = normalizeHeader(raw);
+  // Exact match first
   if (COL_MAP_NORMALIZED[norm]) return COL_MAP_NORMALIZED[norm];
-  // Partial match for the long AUTORIZA column
+  // Partial match for AUTORIZA column (long text)
   if (norm.startsWith('autoriza')) return 'autoriza';
+  // Contains match for financial columns
+  if (norm.includes('falta') || norm.includes('restante') || norm.includes('saldo a pagar')) return 'falta_pagar';
+  if (norm === 'pago' || norm.endsWith(' pago') || norm.startsWith('pago ')) return 'pago';
   return undefined;
 }
 
@@ -265,7 +337,7 @@ export async function parseXlsxBuffer(buffer: ArrayBuffer): Promise<ParseResult>
   }) as unknown[][];
 
   if (rawRows.length < 2) {
-    return { rows: [], errors: [], totalRows: 0, skipped: 0 };
+    return { rows: [], errors: [], totalRows: 0, skipped: 0, detectedColumns: {} };
   }
 
   // Build column index map — tolerante a variações de acento e capitalização
@@ -339,10 +411,20 @@ export async function parseXlsxBuffer(buffer: ArrayBuffer): Promise<ParseResult>
     }
   }
 
+  // Build human-readable detected columns map for debugging
+  const detectedColumns: Record<string, string> = {};
+  headerRow.forEach((h) => {
+    if (!h) return;
+    const key = resolveColKey(String(h));
+    if (key) detectedColumns[String(h)] = key;
+  });
+  console.debug('[xlsxParser] Colunas detectadas:', detectedColumns);
+
   return {
     rows,
     errors,
     totalRows: rawRows.length - 1,
     skipped,
+    detectedColumns,
   };
 }

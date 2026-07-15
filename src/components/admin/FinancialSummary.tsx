@@ -25,17 +25,26 @@ interface RecebimentoRecord {
   };
 }
 
-function parseDateBR(val: string | null | undefined): Date | null {
-  if (!val) return null;
-  // ISO format YYYY-MM-DD from Supabase
+/** Converte YYYY-MM-DD do Supabase para DD/MM/YYYY sem criar objeto Date (evita shift de fuso) */
+function formatDateBR(val: string | null | undefined): string {
+  if (!val) return '—';
   const m = val.match(/^(\d{4})-(\d{2})-(\d{2})/);
-  if (m) return new Date(`${m[1]}-${m[2]}-${m[3]}T00:00:00`);
-  return null;
+  if (m) return `${m[3]}/${m[2]}/${m[1]}`;
+  return val;
 }
 
-function formatDateBR(val: string | null | undefined): string {
-  const d = parseDateBR(val);
-  return d ? d.toLocaleDateString('pt-BR') : '—';
+/** Para ordenação: retorna string YYYYMMDD para comparação lexicográfica correta */
+function dateKey(val: string | null | undefined): string {
+  if (!val) return '00000000';
+  const m = val.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[1]}${m[2]}${m[3]}` : '00000000';
+}
+
+/** Para filtro por período: converte YYYY-MM-DD para timestamp UTC noon (sem shift) */
+function dateToNoon(ymd: string): number {
+  const m = ymd.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return 0;
+  return Date.UTC(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3]), 12, 0, 0);
 }
 
 export function FinancialSummary() {
@@ -256,14 +265,12 @@ export function FinancialSummary() {
 
     // Date/period filter (by data_evento)
     const fe = r.formularios_eventos as any;
-    const evDate = parseDateBR(fe?.data_evento);
-    if (dateFrom && evDate) {
-      const from = new Date(dateFrom + 'T00:00:00');
-      if (evDate < from) return false;
+    const evDateStr: string | null = fe?.data_evento || null;
+    if (dateFrom && evDateStr) {
+      if (dateToNoon(evDateStr) < dateToNoon(dateFrom)) return false;
     }
-    if (dateTo && evDate) {
-      const to = new Date(dateTo + 'T23:59:59');
-      if (evDate > to) return false;
+    if (dateTo && evDateStr) {
+      if (dateToNoon(evDateStr) > dateToNoon(dateTo)) return false;
     }
 
     return true;
@@ -278,8 +285,8 @@ export function FinancialSummary() {
 
     switch (sortField) {
       case 'data_evento':
-        valA = parseDateBR(feA?.data_evento)?.getTime() ?? 0;
-        valB = parseDateBR(feB?.data_evento)?.getTime() ?? 0;
+        valA = dateKey(feA?.data_evento);
+        valB = dateKey(feB?.data_evento);
         break;
       case 'protocolo':
         valA = feA?.protocolo || '';
@@ -720,7 +727,7 @@ export function FinancialSummary() {
                       {rec.numero_nf || (rec.nota_fiscal_emitida ? '—' : '')}
                       {rec.data_emissao_nf && (
                         <div style={{ fontSize: '0.7rem', color: 'var(--color-muted)' }}>
-                          {new Date(rec.data_emissao_nf + 'T00:00:00').toLocaleDateString('pt-BR')}
+                          {formatDateBR(rec.data_emissao_nf)}
                         </div>
                       )}
                     </td>
