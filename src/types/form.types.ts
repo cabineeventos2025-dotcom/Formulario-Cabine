@@ -16,6 +16,7 @@ export interface EnderecoFields {
 
 export interface EnderecoEventoFields extends EnderecoFields {
   referencia: string;
+  local: string;
 }
 
 export type FormaPagamentoPF =
@@ -93,6 +94,7 @@ export interface FormData {
 
   // Event
   nome_evento: string;
+  local_evento: string;
   cep_evento: string;
   logradouro_evento: string;
   numero_evento: string;
@@ -157,6 +159,7 @@ export const defaultFormData: FormData = {
   email: '',
   contato_cerimonial: '',
   nome_evento: '',
+  local_evento: '',
   cep_evento: '',
   logradouro_evento: '',
   numero_evento: '',

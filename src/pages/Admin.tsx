@@ -616,7 +616,7 @@ export function Admin() {
 }
 
 // ─────────────────────────────────────────────────────────
-// Form Detail Component (com edição e exclusão)
+// Form Detail Component (com edição completa)
 // ─────────────────────────────────────────────────────────
 function FormDetail({
   form, onBack, onDelete,
@@ -628,29 +628,56 @@ function FormDetail({
   const isPF = form.tipo_pessoa === 'PF';
   const fa = form as any;
 
-  // edit state
+  // edit state — ALL fields
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
   const [edited, setEdited] = useState({
-    nome_evento:    form.nome_evento    || '',
-    data_evento:    fa.data_evento      || '',
+    // Personal - PF
+    nome_contratante:   fa.nome_contratante   || '',
+    data_nascimento:    fa.data_nascimento     || '',
+    cpf:                fa.cpf                 || '',
+    rg:                 fa.rg                  || '',
+    // Personal - PJ
+    nome_fantasia:      fa.nome_fantasia       || '',
+    cnpj:               fa.cnpj                || '',
+    nome_responsavel:   fa.nome_responsavel    || '',
+    // Contratante address
+    cep:                fa.cep                 || '',
+    logradouro:         fa.logradouro          || '',
+    numero:             fa.numero              || '',
+    complemento:        fa.complemento         || '',
+    bairro:             fa.bairro              || '',
+    cidade:             fa.cidade              || '',
+    estado:             fa.estado              || '',
+    // Contacts
+    email:              fa.email               || '',
+    telefone:           fa.telefone            || '',
+    contato_cerimonial: fa.contato_cerimonial  || '',
+    // Event
+    nome_evento:        fa.nome_evento         || '',
+    data_evento:        fa.data_evento         || '',
     horario_inicio_evento: fa.horario_inicio_evento || '',
     horario_inicio_fotos:  fa.horario_inicio_fotos  || '',
-    cidade_evento:  form.cidade_evento  || '',
-    logradouro_evento: fa.logradouro_evento || '',
-    numero_evento:  fa.numero_evento    || '',
-    complemento_evento: fa.complemento_evento || '',
-    bairro_evento:  fa.bairro_evento    || '',
-    forma_pagamento: form.forma_pagamento || '',
-    quantidade_horas: form.quantidade_horas || '',
-    pacote_nome_snapshot: form.pacote_nome_snapshot || '',
-    equipamento_nome_snapshot: form.equipamento_nome_snapshot || '',
-    comentarios:    form.comentarios    || '',
-    email:          form.email          || '',
-    telefone:       form.telefone       || '',
-    contato_cerimonial: fa.contato_cerimonial || '',
+    // Event address
+    local_evento:       fa.local_evento        || '',
+    cep_evento:         fa.cep_evento          || '',
+    logradouro_evento:  fa.logradouro_evento   || '',
+    numero_evento:      fa.numero_evento       || '',
+    complemento_evento: fa.complemento_evento  || '',
+    bairro_evento:      fa.bairro_evento       || '',
+    cidade_evento:      fa.cidade_evento       || '',
+    estado_evento:      fa.estado_evento       || '',
+    referencia_evento:  fa.referencia_evento   || '',
+    // Service
+    forma_pagamento:    fa.forma_pagamento     || '',
+    quantidade_horas:   fa.quantidade_horas    || '',
+    pacote_nome_snapshot: fa.pacote_nome_snapshot || '',
+    equipamento_nome_snapshot: fa.equipamento_nome_snapshot || '',
+    comentarios:        fa.comentarios         || '',
   });
+
+  const upd = (f: keyof typeof edited, v: string) => setEdited(p => ({ ...p, [f]: v }));
 
   const handleSave = async () => {
     setSaving(true);
@@ -662,16 +689,25 @@ function FormDetail({
     }
   };
 
-  const Field = ({ label, field, type = 'text' }: { label: string; field: keyof typeof edited; type?: string }) => (
+  // Helper: renders a read-only row OR an editable input
+  const F = ({
+    label, field, type = 'text', placeholder = '',
+  }: {
+    label: string;
+    field: keyof typeof edited;
+    type?: string;
+    placeholder?: string;
+  }) => (
     <div className="review-field">
       <span className="review-field-label">{label}</span>
       {editing ? (
         <input
           type={type}
           className="field-input"
-          style={{ fontSize: '0.85rem', padding: '4px 8px', maxWidth: 320 }}
+          style={{ fontSize: '0.85rem', padding: '5px 10px', flex: 1, maxWidth: 340 }}
           value={edited[field]}
-          onChange={e => setEdited(p => ({ ...p, [field]: e.target.value }))}
+          onChange={e => upd(field, e.target.value)}
+          placeholder={placeholder}
         />
       ) : (
         <span className="review-field-value">{(edited[field] as string) || '—'}</span>
@@ -679,6 +715,7 @@ function FormDetail({
     </div>
   );
 
+  // Read-only row (non-editable)
   const Row = ({ label, value }: { label: string; value: string | null | undefined }) => {
     if (!value) return null;
     return (
@@ -699,7 +736,7 @@ function FormDetail({
         <div style={{ flex: 1 }} />
         {detailTab === 'dados' && !editing ? (
           <>
-            <button className="btn btn-secondary" onClick={() => setEditing(true)}>✏️ Editar</button>
+            <button className="btn btn-secondary" onClick={() => setEditing(true)}>✏️ Editar todos os dados</button>
             <button className="btn btn-ghost" style={{ color: '#ef4444', borderColor: '#ef4444' }} onClick={() => setConfirmDel(true)}>🗑️ Excluir</button>
           </>
         ) : detailTab === 'dados' && editing ? (
@@ -719,11 +756,17 @@ function FormDetail({
         </div>
       )}
 
+      {editing && (
+        <div style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.3)', borderRadius: 10, padding: '10px 16px', marginBottom: 14, fontSize: '0.82rem', color: '#f59e0b', fontWeight: 600 }}>
+          ✏️ Modo de edição ativo — todos os campos estão editáveis. Clique em <strong>Salvar alterações</strong> para confirmar.
+        </div>
+      )}
+
       <div style={{ display: 'flex', gap: 8, marginBottom: 20, alignItems: 'center' }}>
         <span className={`badge badge-${form.tipo_pessoa?.toLowerCase()}`}>{form.tipo_pessoa}</span>
         <code style={{ fontSize: '0.85rem', color: 'var(--color-secondary)' }}>{form.protocolo}</code>
         <span style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--color-text)', marginLeft: 8 }}>
-          {isPF ? form.nome_contratante : form.nome_fantasia}
+          {editing ? (edited.nome_contratante || edited.nome_fantasia) : (isPF ? form.nome_contratante : form.nome_fantasia)}
         </span>
       </div>
 
@@ -734,15 +777,11 @@ function FormDetail({
             key={id}
             onClick={() => setDetailTab(id as 'dados'|'contrato')}
             style={{
-              padding: '10px 20px',
-              background: 'transparent',
-              border: 'none',
+              padding: '10px 20px', background: 'transparent', border: 'none',
               borderBottom: detailTab === id ? '2px solid var(--color-secondary)' : '2px solid transparent',
               color: detailTab === id ? 'var(--color-secondary)' : 'var(--color-muted)',
               fontWeight: detailTab === id ? 700 : 400,
-              cursor: 'pointer',
-              fontSize: '0.9rem',
-              transition: 'all 0.15s',
+              cursor: 'pointer', fontSize: '0.9rem', transition: 'all 0.15s',
             }}
           >{label}</button>
         ))}
@@ -755,83 +794,111 @@ function FormDetail({
 
       {/* Tab: Dados */}
       {detailTab === 'dados' && (<>
-      <div className="admin-card">
-        <div className="review-section-title" style={{ marginBottom: 10 }}>
-          {isPF ? 'Dados pessoais' : 'Dados da empresa'}
-        </div>
-        {isPF ? (
-          <>
-            <Row label="Nome" value={form.nome_contratante} />
-            <Row label="CPF" value={formatCPFDisplay(fa.cpf)} />
-            <Row label="RG" value={fa.rg} />
-            <Row label="Nascimento" value={formatDate(fa.data_nascimento)} />
-            <Row label="Endereço" value={[
-              fa.logradouro, fa.numero, fa.complemento, fa.bairro, fa.cidade, fa.estado, fa.cep
-            ].filter(Boolean).join(', ')} />
-          </>
-        ) : (
-          <>
-            <Row label="Nome Fantasia" value={form.nome_fantasia} />
-            <Row label="CNPJ" value={formatCNPJDisplay(fa.cnpj)} />
-            <Row label="Responsável" value={form.nome_responsavel} />
-            <Row label="Endereço empresa" value={[
-              fa.empresa_logradouro || fa.logradouro_empresa, fa.empresa_numero, fa.empresa_complemento,
-              fa.empresa_bairro, fa.empresa_cidade, fa.empresa_estado
-            ].filter(Boolean).join(', ')} />
-          </>
-        )}
-        <Field label="E-mail" field="email" type="email" />
-        <Field label="Telefone" field="telefone" />
-        <Field label="Contato cerimonial" field="contato_cerimonial" />
-      </div>
 
-      {/* Dados do evento */}
-      <div className="admin-card">
-        <div className="review-section-title" style={{ marginBottom: 10 }}>Dados do evento</div>
-        <Field label="Nome do evento" field="nome_evento" />
-        <Field label="Data" field="data_evento" type="date" />
-        <Field label="Início evento" field="horario_inicio_evento" type="time" />
-        <Field label="Início fotos" field="horario_inicio_fotos" type="time" />
-        <Row label="Endereço do evento" value={[
-          fa.logradouro_evento, fa.numero_evento, fa.complemento_evento,
-          fa.bairro_evento, fa.cidade_evento, fa.estado_evento, fa.cep_evento
-        ].filter(Boolean).join(', ')} />
-        <Field label="Forma de pagamento" field="forma_pagamento" />
-        <Field label="Horas" field="quantidade_horas" />
-        <Field label="Pacote" field="pacote_nome_snapshot" />
-        <div className="review-field">
-          <span className="review-field-label">Equipamento</span>
-          <span className="review-field-value">
-            {fa.equipamento_nome_snapshot || <span style={{color:'#f59e0b'}}>⚠ Não preenchido</span>}
-          </span>
+        {/* ── Dados pessoais ── */}
+        <div className="admin-card">
+          <div className="review-section-title" style={{ marginBottom: 10 }}>
+            {isPF ? '👤 Dados pessoais' : '🏢 Dados da empresa'}
+          </div>
+          {isPF ? (<>
+            <F label="Nome completo"   field="nome_contratante" placeholder="Nome do contratante" />
+            <F label="CPF"             field="cpf"              placeholder="000.000.000-00" />
+            <F label="RG"              field="rg"               placeholder="RG" />
+            <F label="Nascimento"      field="data_nascimento"  type="date" />
+          </>) : (<>
+            <F label="Nome Fantasia"   field="nome_fantasia"    placeholder="Nome da empresa" />
+            <F label="CNPJ"            field="cnpj"             placeholder="00.000.000/0000-00" />
+            <F label="Responsável"     field="nome_responsavel" placeholder="Nome do responsável" />
+          </>)}
         </div>
-        <Row label="Publicação fotos" value={
-          form.autoriza_publicacao_fotos === true ? 'Autorizado' :
-          form.autoriza_publicacao_fotos === false ? 'Não autorizado' : '—'
-        } />
-      </div>
 
-      {/* Comentários */}
-      <div className="admin-card">
-        <div className="review-section-title" style={{ marginBottom: 10 }}>Comentários</div>
-        {editing ? (
-          <textarea
-            className="field-input"
-            rows={4}
-            style={{ fontSize: '0.85rem' }}
-            value={edited.comentarios}
-            onChange={e => setEdited(p => ({ ...p, comentarios: e.target.value }))}
-          />
-        ) : (
-          <p style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)', lineHeight: 1.6 }}>
-            {edited.comentarios || '—'}
-          </p>
-        )}
-      </div>
+        {/* ── Endereço do contratante ── */}
+        <div className="admin-card">
+          <div className="review-section-title" style={{ marginBottom: 10 }}>
+            🏠 {isPF ? 'Endereço residencial' : 'Endereço da empresa'}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0 }}>
+            <F label="CEP"          field="cep"         placeholder="00000-000" />
+            <F label="Logradouro"   field="logradouro"  placeholder="Rua, Av..." />
+            <F label="Número"       field="numero"      placeholder="Nº" />
+            <F label="Complemento"  field="complemento" placeholder="Apto, Sala..." />
+            <F label="Bairro"       field="bairro"      placeholder="Bairro" />
+            <F label="Cidade"       field="cidade"      placeholder="Cidade" />
+            <F label="Estado"       field="estado"      placeholder="UF" />
+          </div>
+        </div>
+
+        {/* ── Contatos ── */}
+        <div className="admin-card">
+          <div className="review-section-title" style={{ marginBottom: 10 }}>📞 Contatos</div>
+          <F label="E-mail"              field="email"              type="email" placeholder="email@exemplo.com" />
+          <F label="Telefone"            field="telefone"           placeholder="(31) 99999-9999" />
+          <F label="Cerimonial / Obs."   field="contato_cerimonial" placeholder="Contato cerimonial..." />
+        </div>
+
+        {/* ── Dados do evento ── */}
+        <div className="admin-card">
+          <div className="review-section-title" style={{ marginBottom: 10 }}>🎉 Dados do evento</div>
+          <F label="Nome do evento"  field="nome_evento"           placeholder="Nome do evento" />
+          <F label="Data do evento"  field="data_evento"           type="date" />
+          <F label="Início evento"   field="horario_inicio_evento" type="time" />
+          <F label="Início fotos"    field="horario_inicio_fotos"  type="time" />
+        </div>
+
+        {/* ── Endereço do evento ── */}
+        <div className="admin-card">
+          <div className="review-section-title" style={{ marginBottom: 10 }}>📍 Endereço do evento</div>
+          <F label="Local (venue)"   field="local_evento"       placeholder="Nome do espaço/venue" />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0 }}>
+            <F label="CEP"           field="cep_evento"         placeholder="00000-000" />
+            <F label="Logradouro"    field="logradouro_evento"  placeholder="Rua, Av..." />
+            <F label="Número"        field="numero_evento"      placeholder="Nº" />
+            <F label="Complemento"   field="complemento_evento" placeholder="Apto, Sala..." />
+            <F label="Bairro"        field="bairro_evento"      placeholder="Bairro" />
+            <F label="Cidade"        field="cidade_evento"      placeholder="Cidade" />
+            <F label="Estado"        field="estado_evento"      placeholder="UF" />
+          </div>
+          <F label="Ponto de referência" field="referencia_evento" placeholder="Próximo a..." />
+        </div>
+
+        {/* ── Serviço ── */}
+        <div className="admin-card">
+          <div className="review-section-title" style={{ marginBottom: 10 }}>📦 Serviço contratado</div>
+          <F label="Forma de pagamento"  field="forma_pagamento"            placeholder="boleto, pix..." />
+          <F label="Horas"               field="quantidade_horas"           placeholder="2, 3, 4..." />
+          <F label="Pacote"              field="pacote_nome_snapshot"       placeholder="Nome do pacote" />
+          <F label="Equipamento"         field="equipamento_nome_snapshot"  placeholder="Nome do equipamento" />
+          <div className="review-field">
+            <span className="review-field-label">Autoriza publicação</span>
+            <span className="review-field-value">
+              {fa.autoriza_publicacao_fotos === true ? '✅ Autorizado' :
+               fa.autoriza_publicacao_fotos === false ? '❌ Não autorizado' : '—'}
+            </span>
+          </div>
+        </div>
+
+        {/* ── Comentários ── */}
+        <div className="admin-card">
+          <div className="review-section-title" style={{ marginBottom: 10 }}>💬 Comentários</div>
+          {editing ? (
+            <textarea
+              className="field-input"
+              rows={4}
+              style={{ fontSize: '0.85rem' }}
+              value={edited.comentarios}
+              onChange={e => upd('comentarios', e.target.value)}
+              placeholder="Comentários e observações..."
+            />
+          ) : (
+            <p style={{ fontSize: '0.9rem', color: 'var(--color-text-secondary)', lineHeight: 1.6 }}>
+              {edited.comentarios || '—'}
+            </p>
+          )}
+        </div>
 
         <div className="admin-card">
-          <div className="review-section-title" style={{ marginBottom: 10 }}>Metadata</div>
-          <Row label="Protocolo" value={form.protocolo} />
+          <div className="review-section-title" style={{ marginBottom: 10 }}>🔖 Metadados</div>
+          <Row label="Protocolo"  value={form.protocolo} />
           <Row label="Enviado em" value={formatDateTime(form.created_at)} />
         </div>
       </>)}

@@ -240,11 +240,30 @@ export function Formulario() {
       // CEP evento opcional — preenche automaticamente quando digitado
       if (formData.cep_evento && onlyDigits(formData.cep_evento).length > 0 && onlyDigits(formData.cep_evento).length !== 8)
         newErrors.cep_evento = 'CEP inválido (8 dígitos).';
+      if (!formData.local_evento) newErrors.local_evento = 'Informe o local do evento (nome do espaço).';
       if (!formData.logradouro_evento) newErrors.logradouro_evento = 'Informe o logradouro.';
       if (!formData.numero_evento) newErrors.numero_evento = 'Informe o número.';
       if (!formData.bairro_evento) newErrors.bairro_evento = 'Informe o bairro.';
       if (!formData.cidade_evento) newErrors.cidade_evento = 'Informe a cidade.';
-      if (!formData.data_evento) newErrors.data_evento = 'Informe a data do evento.';
+      if (!formData.data_evento) {
+        newErrors.data_evento = 'Informe a data do evento.';
+      } else {
+        // Validate date format
+        const parts = formData.data_evento.split('/');
+        if (parts.length === 3) {
+          const [d, m, y] = parts.map(Number);
+          const eventDate = new Date(y, m - 1, d);
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          if (isNaN(eventDate.getTime())) {
+            newErrors.data_evento = 'Data inválida. Use o formato DD/MM/AAAA.';
+          } else if (eventDate < today) {
+            newErrors.data_evento = '⚠️ A data do evento não pode ser no passado. Informe uma data futura.';
+          }
+        } else {
+          newErrors.data_evento = 'Informe a data do evento no formato DD/MM/AAAA.';
+        }
+      }
       if (formData.tipo_pessoa === 'PJ' && !formData.horario_inicio_evento)
         newErrors.horario_inicio_evento = 'Informe o horário de início.';
     }
@@ -792,6 +811,25 @@ export function Formulario() {
               <h3 style={{ fontSize: '1rem', fontWeight: 600, color: 'var(--color-text)', marginBottom: 4 }}>
                 Endereço do evento <span className="required-mark">*</span>
               </h3>
+
+              {/* LOCAL — nome do espaço/venue */}
+              <div className="field-wrapper">
+                <label className="field-label" htmlFor="field-local_evento">
+                  Local do evento <span className="required-mark">*</span>
+                </label>
+                <input
+                  id="field-local_evento"
+                  type="text"
+                  className={`field-input ${errors.local_evento ? 'error' : ''}`}
+                  value={formData.local_evento}
+                  onChange={(e) => update('local_evento', e.target.value)}
+                  placeholder="Ex: Espaço Guaicuí, Clube do Corpo, Buffet das Flores..."
+                />
+                <span className="field-helper">
+                  Nome do local/espaço onde o evento acontecerá.
+                </span>
+                {errors.local_evento && <span className="field-error">{errors.local_evento}</span>}
+              </div>
 
               <AddressFields
                 values={{
